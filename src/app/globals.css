@@ -1,0 +1,214 @@
+@import "tailwindcss";
+
+/* ── Google Fonts are loaded via next/font in layout.tsx ── */
+
+/* ─────────────────────────────────────────────
+   DESIGN TOKENS — CSS Custom Properties
+   ───────────────────────────────────────────── */
+:root {
+  /* Paper & Ink Palette — Light */
+  --color-base:        #FBFBF9;
+  --color-surface:     #F4F4F1;
+  --color-border:      #E4E4E0;
+  --color-border-soft: #EDEDEA;
+  --color-ink:         #1A1A1A;
+  --color-ink-muted:   #6B6B6B;
+  --color-ink-faint:   #A8A8A4;
+  --color-accent:      #2D5BE3;
+  --color-accent-soft: #EEF2FD;
+
+  /* Shadows — stacked physical paper feel */
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 6px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.04);
+  --shadow-lg: 0 10px 15px rgba(0,0,0,0.06), 0 4px 6px rgba(0,0,0,0.04);
+  --shadow-xl: 0 20px 25px rgba(0,0,0,0.07), 0 8px 10px rgba(0,0,0,0.04);
+
+  /* Typography scale */
+  --font-ui:       var(--font-geist-sans), 'Archivo', system-ui, sans-serif;
+  --font-serif:    var(--font-fraunces), 'Newsreader', Georgia, serif;
+  --font-mono:     var(--font-geist-mono), 'Fira Code', monospace;
+
+  /* Spacing rhythm */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* Transitions */
+  --ease-out-expo: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out:   cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 150ms;
+  --duration-base: 220ms;
+  --duration-slow: 350ms;
+}
+
+/* Dark theme tokens */
+[data-theme="dark"] {
+  --color-base:        #141414;
+  --color-surface:     #1E1E1E;
+  --color-border:      #2C2C2C;
+  --color-border-soft: #252525;
+  --color-ink:         #EFEFED;
+  --color-ink-muted:   #8A8A88;
+  --color-ink-faint:   #4A4A48;
+  --color-accent:      #5B7EF5;
+  --color-accent-soft: #1A2140;
+
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 6px rgba(0,0,0,0.35), 0 2px 4px rgba(0,0,0,0.25);
+  --shadow-lg: 0 10px 15px rgba(0,0,0,0.4), 0 4px 6px rgba(0,0,0,0.3);
+  --shadow-xl: 0 20px 25px rgba(0,0,0,0.45), 0 8px 10px rgba(0,0,0,0.3);
+}
+
+/* Sepia theme tokens */
+[data-theme="sepia"] {
+  --color-base:        #F5F0E8;
+  --color-surface:     #EDE8DE;
+  --color-border:      #DDD6C8;
+  --color-border-soft: #E6E0D4;
+  --color-ink:         #2C2416;
+  --color-ink-muted:   #7A6E5E;
+  --color-ink-faint:   #B0A898;
+  --color-accent:      #8B5E3C;
+  --color-accent-soft: #F0E8DC;
+}
+
+/* ─────────────────────────────────────────────
+   RESET & BASE
+   ───────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-size: 16px;
+}
+
+body {
+  background-color: var(--color-base);
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+  line-height: 1.6;
+  transition:
+    background-color var(--duration-slow) var(--ease-out-expo),
+    color var(--duration-slow) var(--ease-out-expo);
+}
+
+/* Scrollbar — subtle and minimal */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--color-ink-faint); }
+
+/* Focus ring — accessible, on-brand */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Selection */
+::selection {
+  background: var(--color-accent-soft);
+  color: var(--color-ink);
+}
+
+/* Smooth transitions for theme switching */
+*, *::before, *::after {
+  transition-property: background-color, border-color, color;
+  transition-duration: var(--duration-slow);
+  transition-timing-function: var(--ease-out-expo);
+}
+
+/* Override: never transition transforms/opacity globally — only explicitly */
+* { transition-property: background-color, border-color, color; }
+
+/* ─────────────────────────────────────────────
+   FONT SWITCHING — via data-font attribute
+   ───────────────────────────────────────────── */
+
+/* Serif mode: document body uses Fraunces */
+[data-font="serif"] .proseBody,
+[data-font="serif"] .cm-content {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 1.8;
+}
+
+/* Sans mode: document body uses Geist */
+[data-font="sans"] .proseBody,
+[data-font="sans"] .cm-content {
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.75;
+}
+
+/* ─────────────────────────────────────────────
+   PERFORMANCE — GPU compositing hints
+   ───────────────────────────────────────────── */
+
+/*
+  Only add will-change to elements that will definitely animate.
+  Remove it after animation completes (handled by Framer Motion).
+  Never apply globally — that defeats the purpose.
+*/
+
+/* Sidebar: will animate transform on open/close */
+.sidebarAnimating {
+  will-change: transform;
+}
+
+/* Panels: will animate opacity + transform */
+.panelAnimating {
+  will-change: opacity, transform;
+}
+
+/* ─────────────────────────────────────────────
+   REDUCED MOTION — respect user preference
+   ───────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ─────────────────────────────────────────────
+   PRINT — clean document output
+   ───────────────────────────────────────────── */
+
+@media print {
+  .sidebar,
+  .toolbar,
+  .settingsPanel,
+  .saveIndicator {
+    display: none !important;
+  }
+
+  .prose {
+    max-width: 100% !important;
+    padding: 0 !important;
+  }
+}
+
+.welcomeShortcutHint {
+  font-size: 12px;
+  color: var(--color-ink-faint);
+  margin-left: 4px;
+  font-family: var(--font-ui);
+}

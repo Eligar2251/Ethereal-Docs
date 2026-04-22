@@ -1,0 +1,413 @@
+/* ── Root — sits alongside editor ── */
+.root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  overflow: hidden;
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* ── Header ── */
+.header {
+  height: 48px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-ink);
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  font-family: var(--font-ui);
+}
+
+.logoMark {
+  width: 22px;
+  height: 22px;
+  background: var(--color-ink);
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ── New document button ── */
+.newBtn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-ink);
+  color: var(--color-base);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    opacity var(--duration-fast) var(--ease-out-expo),
+    transform var(--duration-fast) var(--ease-out-expo);
+  flex-shrink: 0;
+}
+
+.newBtn:hover { opacity: 0.8; }
+.newBtn:active { transform: scale(0.92); }
+
+/* ── Search ── */
+.searchWrap {
+  padding: 12px 12px 8px;
+  flex-shrink: 0;
+}
+
+.searchInput {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px 0 32px;
+  background: var(--color-base);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--color-ink);
+  outline: none;
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    box-shadow var(--duration-fast) var(--ease-out-expo);
+}
+
+.searchInput::placeholder { color: var(--color-ink-faint); }
+
+.searchInput:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+
+.searchWrapInner {
+  position: relative;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-ink-faint);
+  pointer-events: none;
+}
+
+/* ── Section label ── */
+.sectionLabel {
+  padding: 8px 16px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+  font-family: var(--font-ui);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+/* ── Scrollable document list ── */
+.list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── Document item ── */
+.docItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  transition: background var(--duration-fast) var(--ease-out-expo);
+  gap: 10px;
+  position: relative;
+  outline: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.docItem:hover {
+  background: var(--color-border-soft);
+}
+
+/* Keyboard focus ring — важно для accessibility */
+.docItem:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.docItem[aria-current="true"] {
+  background: var(--color-base);
+  box-shadow: var(--shadow-xs);
+}
+
+.docItem[aria-current="true"]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  height: 60%;
+  width: 2px;
+  background: var(--color-ink);
+  border-radius: 0 2px 2px 0;
+}
+
+/* ── Doc item actions (appear on hover) ── */
+.docActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out-expo);
+  flex-shrink: 0;
+}
+
+.docItem:hover .docActions      { opacity: 1; }
+.docItem:focus-visible .docActions { opacity: 1; }
+.docItem[aria-current="true"] .docActions { opacity: 1; }
+
+/* ── Doc action button (span с role=button) ── */
+.docActionBtn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--color-ink-muted);
+  transition:
+    background var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo);
+  outline: none;
+}
+
+.docActionBtn:hover {
+  background: var(--color-border);
+  color: var(--color-ink);
+}
+
+.docActionBtn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.docActionBtn.danger:hover {
+  background: rgba(220, 38, 38, 0.08);
+  color: #DC2626;
+}
+
+/* ── Doc item inner ── */
+.docItemContent {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.docTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.docMeta {
+  font-size: 11px;
+  color: var(--color-ink-faint);
+  font-family: var(--font-ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Doc item actions (appear on hover) ── */
+.docActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out-expo);
+  flex-shrink: 0;
+}
+
+.docItem:hover .docActions { opacity: 1; }
+.docItem[aria-current="true"] .docActions { opacity: 1; }
+
+.docActionBtn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--color-ink-muted);
+  transition:
+    background var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo);
+}
+
+.docActionBtn:hover {
+  background: var(--color-border);
+  color: var(--color-ink);
+}
+
+.docActionBtn.danger:hover {
+  background: rgba(220, 38, 38, 0.08);
+  color: #DC2626;
+}
+
+/* ── Empty state ── */
+.emptyState {
+  padding: 32px 16px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.emptyIcon { opacity: 0.25; }
+
+.emptyTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink-muted);
+  font-family: var(--font-ui);
+}
+
+.emptyHint {
+  font-size: 12px;
+  color: var(--color-ink-faint);
+  font-family: var(--font-ui);
+  line-height: 1.5;
+}
+
+/* ── Skeleton loader ── */
+.skeleton {
+  padding: 4px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.skeletonItem {
+  height: 52px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    90deg,
+    var(--color-border-soft) 0%,
+    var(--color-border) 50%,
+    var(--color-border-soft) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Footer ── */
+.footer {
+  padding: 10px 12px;
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.userAvatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-ink-muted);
+  font-family: var(--font-ui);
+  overflow: hidden;
+}
+
+.userInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.userName {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.userEmail {
+  font-size: 11px;
+  color: var(--color-ink-faint);
+  font-family: var(--font-ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.signOutBtn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-ink-faint);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo);
+  flex-shrink: 0;
+}
+
+.signOutBtn:hover {
+  background: var(--color-border);
+  color: var(--color-ink);
+}

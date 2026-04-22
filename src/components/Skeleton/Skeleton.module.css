@@ -1,0 +1,35 @@
+.root {
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    90deg,
+    var(--color-border-soft) 0%,
+    var(--color-border)      50%,
+    var(--color-border-soft) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Variants */
+.text {
+  height: 14px;
+  border-radius: 4px;
+}
+
+.heading {
+  height: 22px;
+  border-radius: 4px;
+}
+
+.block {
+  height: 80px;
+}
+
+.circle {
+  border-radius: 50%;
+}

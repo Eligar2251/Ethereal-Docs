@@ -1,0 +1,158 @@
+.root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-base);
+  position: relative;
+}
+
+.cmHost {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.cmHost :global(.cm-editor) {
+  height: 100%;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.75;
+  background: var(--color-base) !important;
+  color: var(--color-ink);
+  outline: none !important;
+}
+
+.cmHost :global(.cm-scroller) {
+  overflow: auto;
+  padding: 48px 56px;
+  font-family: inherit;
+}
+
+.cmHost :global(.cm-content) {
+  max-width: 680px;
+  margin: 0 auto;
+  caret-color: var(--color-ink);
+  padding: 0;
+}
+
+.cmHost :global(.cm-focused .cm-cursor) {
+  border-left-color: var(--color-ink) !important;
+}
+
+.cmHost :global(.cm-selectionBackground),
+.cmHost :global(.cm-focused .cm-selectionBackground) {
+  background: var(--color-accent-soft) !important;
+}
+
+.cmHost :global(.cm-activeLine) {
+  background: transparent !important;
+}
+
+.cmHost :global(.cm-activeLineGutter) {
+  background: transparent !important;
+}
+
+.cmHost :global(.cm-gutters) {
+  display: none;
+}
+
+.cmHost :global(.cm-placeholder) {
+  color: var(--color-ink-faint) !important;
+  font-style: italic;
+  font-family: var(--font-ui);
+}
+
+.cmHost :global(.cm-line) {
+  padding: 0;
+}
+
+.cmHost :global(.tok-heading1) {
+  font-family: var(--font-serif) !important;
+  font-size: 1.8em;
+  font-weight: 400;
+  color: var(--color-ink);
+  letter-spacing: -0.025em;
+}
+
+.cmHost :global(.tok-heading2) {
+  font-family: var(--font-serif) !important;
+  font-size: 1.4em;
+  font-weight: 400;
+  color: var(--color-ink);
+}
+
+.cmHost :global(.tok-heading3) {
+  font-family: var(--font-serif) !important;
+  font-size: 1.15em;
+  font-weight: 400;
+  color: var(--color-ink);
+}
+
+.cmHost :global(.tok-emphasis) {
+  font-style: italic;
+  color: var(--color-ink);
+}
+
+.cmHost :global(.tok-strong) {
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.cmHost :global(.tok-strikethrough) {
+  text-decoration: line-through;
+  color: var(--color-ink-muted);
+}
+
+.cmHost :global(.tok-url),
+.cmHost :global(.tok-link) {
+  color: var(--color-accent);
+}
+
+.cmHost :global(.tok-monospace),
+.cmHost :global(.tok-code) {
+  font-family: var(--font-mono) !important;
+  font-size: 0.88em;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.cmHost :global(.tok-meta),
+.cmHost :global(.tok-punctuation) {
+  color: var(--color-ink-faint);
+}
+
+.cmHost :global(.tok-quote) {
+  color: var(--color-ink-muted);
+  font-style: italic;
+}
+
+.footer {
+  height: 32px;
+  padding: 0 56px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-top: 1px solid var(--color-border-soft);
+  background: var(--color-base);
+  flex-shrink: 0;
+}
+
+.footerStat {
+  font-size: 11px;
+  color: var(--color-ink-faint);
+  font-family: var(--font-ui);
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+.footerDot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--color-border);
+  flex-shrink: 0;
+}

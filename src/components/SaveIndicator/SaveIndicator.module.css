@@ -1,0 +1,23 @@
+.root {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-family: var(--font-ui);
+  color: var(--color-ink-muted);
+  letter-spacing: 0.01em;
+  user-select: none;
+  pointer-events: none;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot[data-state="saving"] { background: #F59E0B; }
+.dot[data-state="saved"]  { background: #16A34A; }
+.dot[data-state="error"]  { background: #DC2626; }
+.dot[data-state="idle"]   { background: var(--color-border); }

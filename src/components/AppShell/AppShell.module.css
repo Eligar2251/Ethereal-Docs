@@ -1,0 +1,82 @@
+.root {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--color-base);
+}
+
+.sidebarWrapper {
+  flex-shrink: 0;
+  overflow: hidden;
+  height: 100vh;
+  width: 260px;
+}
+
+.editorArea {
+  flex: 1;
+  min-width: 0;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.editorPane {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: var(--color-ink-muted);
+  font-family: var(--font-ui);
+  user-select: none;
+}
+
+.welcomeTitle {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 300;
+  color: var(--color-ink);
+  letter-spacing: -0.025em;
+}
+
+.welcomeHint {
+  font-size: 14px;
+  color: var(--color-ink-muted);
+}
+
+.welcomeShortcut {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.welcomeShortcutHint {
+  font-size: 12px;
+  color: var(--color-ink-faint);
+  margin-left: 4px;
+  font-family: var(--font-ui);
+}
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 7px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--color-ink-muted);
+}
