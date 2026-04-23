@@ -89,6 +89,7 @@ html {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   font-size: 16px;
+  overflow-x: hidden;
 }
 
 body {
@@ -96,6 +97,7 @@ body {
   color: var(--color-ink);
   font-family: var(--font-ui);
   line-height: 1.6;
+  overflow-x: hidden;
   transition:
     background-color var(--duration-slow) var(--ease-out-expo),
     color var(--duration-slow) var(--ease-out-expo);
@@ -157,18 +159,10 @@ body {
    PERFORMANCE — GPU compositing hints
    ───────────────────────────────────────────── */
 
-/*
-  Only add will-change to elements that will definitely animate.
-  Remove it after animation completes (handled by Framer Motion).
-  Never apply globally — that defeats the purpose.
-*/
-
-/* Sidebar: will animate transform on open/close */
 .sidebarAnimating {
   will-change: transform;
 }
 
-/* Panels: will animate opacity + transform */
 .panelAnimating {
   will-change: opacity, transform;
 }

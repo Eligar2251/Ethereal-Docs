@@ -95,13 +95,30 @@ function AppShellInner({ initialDocuments, profile }: AppShellProps) {
     return data.id
   }, [])
 
+  // ── ИСПРАВЛЕНО: добавлена проверка user_id ──────────────────
   const handleDeleteDocument = useCallback(async (id: string) => {
     const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    await supabase
+    // Не выполняем удаление если нет авторизованного пользователя
+    if (!user) {
+      console.error('[Delete] No authenticated user')
+      return
+    }
+
+    const { error } = await supabase
       .from('documents')
-      .update({ is_deleted: true, deleted_at: new Date().toISOString() })
+      .update({
+        is_deleted: true,
+        deleted_at: new Date().toISOString(),
+      })
       .eq('id', id)
+      .eq('user_id', user.id) // ← защита от удаления чужих документов
+
+    if (error) {
+      console.error('[Delete] Failed:', error.message)
+      return
+    }
 
     setDocuments(prev => prev.filter(d => d.id !== id))
 

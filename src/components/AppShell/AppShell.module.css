@@ -38,6 +38,8 @@
   color: var(--color-ink-muted);
   font-family: var(--font-ui);
   user-select: none;
+  padding: 24px;
+  text-align: center;
 }
 
 .welcomeTitle {
@@ -79,4 +81,43 @@
   font-size: 11px;
   font-family: var(--font-mono);
   color: var(--color-ink-muted);
+}
+
+/* ── Mobile backdrop (hidden on desktop) ── */
+.mobileBackdrop {
+  display: none;
+}
+
+/* ── Мобильная версия ── */
+@media (max-width: 768px) {
+  .sidebarWrapper {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 50;
+    height: 100vh;
+    box-shadow: 2px 0 20px rgba(0,0,0,0.1);
+  }
+
+  .mobileBackdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    background: rgba(0, 0, 0, 0.3);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .editorArea {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .welcomeShortcut {
+    display: none;
+  }
+
+  .welcomeTitle {
+    font-size: 22px;
+  }
 }

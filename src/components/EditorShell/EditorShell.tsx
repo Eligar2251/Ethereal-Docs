@@ -48,6 +48,7 @@ function useAutosave(
     }
   }, [])
 
+  // ── ИСПРАВЛЕНО: добавлена проверка user_id перед сохранением ──
   const save = useCallback(async (
     id: string, title: string, content: string, s: DocumentSettings
   ) => {
@@ -55,14 +56,36 @@ function useAutosave(
     onStateChange('saving')
 
     const supabase = createClient()
+
+    // Получаем текущего пользователя для проверки владельца
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      if (mountedRef.current) onStateChange('error')
+      console.error('[Autosave] No authenticated user')
+      return
+    }
+
     const { error } = await supabase
       .from('documents')
-      .update({ title, content, settings: s, updated_at: new Date().toISOString() })
+      .update({
+        title,
+        content,
+        settings: s,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', id)
+      .eq('user_id', user.id) // ← защита: сохраняем только свои документы
 
     if (!mountedRef.current) return
     onStateChange(error ? 'error' : 'saved')
-    if (!error) setTimeout(() => { if (mountedRef.current) onStateChange('idle') }, 2000)
+    if (!error) {
+      setTimeout(() => {
+        if (mountedRef.current) onStateChange('idle')
+      }, 2000)
+    } else {
+      console.error('[Autosave] Failed:', error.message)
+    }
   }, [onStateChange])
 
   const scheduleSave = useCallback((

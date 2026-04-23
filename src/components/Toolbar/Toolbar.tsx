@@ -105,7 +105,7 @@ function ToolbarInner({
               aria-label={`${label} mode`}
             >
               <Icon size={12} strokeWidth={1.5} />
-              {label}
+              <span className={styles.modeLabel}>{label}</span>
             </button>
           ))}
         </div>

@@ -17,12 +17,14 @@
   align-items: center;
   gap: 4px;
   flex: 1;
+  min-width: 0;
 }
 
 .center {
   display: flex;
   align-items: center;
   gap: 2px;
+  flex-shrink: 0;
 }
 
 .right {
@@ -31,6 +33,7 @@
   gap: 8px;
   flex: 1;
   justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 .iconBtn {
@@ -109,6 +112,10 @@
   box-shadow: var(--shadow-xs);
 }
 
+.modeLabel {
+  display: inline;
+}
+
 .divider {
   width: 1px;
   height: 20px;
@@ -158,4 +165,37 @@
 .spin {
   animation: spin 1s linear infinite;
   display: block;
+}
+
+/* ── Mobile ── */
+@media (max-width: 768px) {
+  .root {
+    padding: 0 8px;
+    gap: 2px;
+  }
+
+  .left {
+    gap: 2px;
+  }
+
+  .divider {
+    margin: 0 4px;
+  }
+
+  .modeBtn {
+    padding: 0 6px;
+    gap: 0;
+  }
+
+  .modeLabel {
+    display: none;
+  }
+
+  .right {
+    gap: 4px;
+  }
+
+  .titleInput {
+    font-size: 13px;
+  }
 }

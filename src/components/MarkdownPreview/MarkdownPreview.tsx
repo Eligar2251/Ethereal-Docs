@@ -19,28 +19,83 @@ const REHYPE_PLUGINS = [
   rehypeSlug,
   [
     rehypeAutolinkHeadings,
-    { behavior: 'wrap', properties: { className: ['heading-anchor'] } },
+    {
+      behavior: 'append',
+      properties: {
+        className: ['heading-anchor'],
+        ariaLabel: 'Link to section',
+      },
+      content: {
+        type: 'element',
+        tagName: 'span',
+        properties: { 'aria-hidden': 'true' },
+        children: [{ type: 'text', value: ' #' }],
+      },
+    },
   ],
 ]
+
+const DANGEROUS_URI_RE = /^(javascript|data|vbscript)\s*:/i
+
+function isSafeHref(href: string | undefined): boolean {
+  if (!href) return false
+  try {
+    const url = new URL(href, 'http://localhost')
+    return ['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol)
+  } catch {
+    return href.startsWith('/') || href.startsWith('#')
+  }
+}
+
+function isExternalHref(href: string | undefined): boolean {
+  if (!href) return false
+  try {
+    const url = new URL(href)
+    return url.origin !== window.location.origin
+  } catch {
+    return false
+  }
+}
 
 const MD_COMPONENTS = {
   input: ({ ...props }: React.InputHTMLAttributes<HTMLInputElement>) => (
     <input {...props} readOnly aria-label="Task item" />
   ),
-  a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a
-      href={href}
-      target={href?.startsWith('http') ? '_blank' : undefined}
-      rel={href?.startsWith('http') ? 'noopener noreferrer' : undefined}
-      {...props}
-    >
-      {children}
-    </a>
-  ),
-  img: ({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt={alt ?? ''} loading="lazy" {...props} />
-  ),
+
+  a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => {
+    if (!isSafeHref(href)) {
+      return <span {...props}>{children}</span>
+    }
+
+    const isExternal = isExternalHref(href)
+
+    return (
+      <a
+        href={href}
+        target={isExternal ? '_blank' : undefined}
+        rel={isExternal ? 'noopener noreferrer' : undefined}
+        {...props}
+      >
+        {children}
+      </a>
+    )
+  },
+
+ img: ({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => {
+    if (typeof src !== 'string' || DANGEROUS_URI_RE.test(src)) {
+      return null
+    }
+
+    return (
+      <img
+        src={src}
+        alt={alt ?? ''}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        {...props}
+      />
+    )
+  },
 }
 
 function MarkdownPreviewInner({ content, className }: MarkdownPreviewProps) {

@@ -73,3 +73,23 @@
 .focusVignetteActive {
   opacity: 1;
 }
+
+/* ── Mobile: split mode shows editor only ── */
+@media (max-width: 768px) {
+  .splitContainer {
+    flex-direction: column;
+  }
+
+  .paneSplitEditor {
+    border-right: none;
+    flex: 1;
+  }
+
+  .paneSplitPreview {
+    display: none;
+  }
+
+  .paneWrite {
+    flex: 1;
+  }
+}
