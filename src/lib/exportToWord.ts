@@ -39,15 +39,34 @@ type BlockToken =
   | { type: 'task'; text: string; checked: boolean }
   | { type: 'table'; headers: string[]; rows: string[][] }
 
-// ── Тип heading level из docx ─────────────────────────────────
 type DocxHeadingLevel = (typeof HeadingLevel)[keyof typeof HeadingLevel]
+
+// ── ИСПРАВЛЕНО: Whitelist безопасных протоколов для ссылок ────
+const SAFE_HREF_RE = /^(https?:|mailto:|#|\/)/i
+
+function sanitizeHref(href: string): string {
+  if (SAFE_HREF_RE.test(href.trim())) {
+    return href.trim()
+  }
+  // Небезопасные протоколы (javascript:, data:, vbscript:) → заглушка
+  return '#'
+}
+
+// ── ИСПРАВЛЕНО: Санитизация имени файла ──────────────────────
+function sanitizeFileName(name: string): string {
+  return name
+    .replace(/[^a-zA-Zа-яА-ЯёЁ0-9\s\-_]/g, '') // только безопасные символы
+    .replace(/\.\./g, '')                          // path traversal защита
+    .replace(/[/\\]/g, '')                          // слэши
+    .replace(/\s+/g, ' ')                           // нормализация пробелов
+    .trim()
+    .slice(0, 100)                                  // ограничение длины
+    || 'document'
+}
 
 // ── Парсер inline-разметки ────────────────────────────────────
 function parseInline(text: string): InlineToken[] {
   const tokens: InlineToken[] = []
-
-  // Убран флаг `s`, т.к. он требует ES2018+.
-  // Для inline-парсинга по одной строке он здесь не нужен.
   const pattern =
     /(\*\*\*|___)(.*?)\1|(\*\*|__)(.*?)\3|(\*|_)(.*?)\5|(~~)(.*?)\7|(`)(.*?)\9|\[([^\]]+)\]\(([^)]+)\)/g
 
@@ -73,7 +92,8 @@ function parseInline(text: string): InlineToken[] {
       tokens.push({
         type: 'link',
         text: match[11],
-        href: match[12],
+        // ── ИСПРАВЛЕНО: санитизация href при парсинге ──────────
+        href: sanitizeHref(match[12]),
       })
     }
 
@@ -102,12 +122,7 @@ function tokenToRun(token: InlineToken): TextRun {
       return new TextRun({ ...base, text: token.text, italics: true })
 
     case 'boldItalic':
-      return new TextRun({
-        ...base,
-        text: token.text,
-        bold: true,
-        italics: true,
-      })
+      return new TextRun({ ...base, text: token.text, bold: true, italics: true })
 
     case 'strike':
       return new TextRun({ ...base, text: token.text, strike: true })
@@ -125,6 +140,9 @@ function tokenToRun(token: InlineToken): TextRun {
       })
 
     case 'link':
+      // ── ИСПРАВЛЕНО: href уже санитизирован в parseInline ─────
+      // Отображаем как текст со стилем ссылки (без гиперссылки в docx
+      // для небезопасных URL — sanitizeHref уже заменил их на #)
       return new TextRun({
         ...base,
         text: token.text,
@@ -133,7 +151,7 @@ function tokenToRun(token: InlineToken): TextRun {
       })
 
     default:
-      return new TextRun({ ...base, text: token.text })
+      return new TextRun({ ...base, text: (token as { text: string }).text })
   }
 }
 
@@ -212,8 +230,8 @@ function parseBlocks(markdown: string): BlockToken[] {
         codeLines.push(lines[i])
         i++
       }
-
       i++
+
       blocks.push({
         type: 'code_block',
         code: codeLines.join('\n'),
@@ -236,11 +254,7 @@ function parseBlocks(markdown: string): BlockToken[] {
     const bulletMatch = line.match(/^(\s*)[-*+]\s+(.+)$/)
     if (bulletMatch) {
       const depth = Math.floor(bulletMatch[1].length / 2)
-      blocks.push({
-        type: 'bullet',
-        text: bulletMatch[2],
-        depth,
-      })
+      blocks.push({ type: 'bullet', text: bulletMatch[2], depth })
       i++
       continue
     }
@@ -273,7 +287,7 @@ function parseBlocks(markdown: string): BlockToken[] {
   return blocks
 }
 
-// ── Heading level map ─────────────────────────────────────────
+// ── Heading maps ──────────────────────────────────────────────
 const HEADING_LEVEL_MAP: Record<1 | 2 | 3 | 4 | 5 | 6, DocxHeadingLevel> = {
   1: HeadingLevel.HEADING_1,
   2: HeadingLevel.HEADING_2,
@@ -283,7 +297,6 @@ const HEADING_LEVEL_MAP: Record<1 | 2 | 3 | 4 | 5 | 6, DocxHeadingLevel> = {
   6: HeadingLevel.HEADING_6,
 }
 
-// ── Heading font sizes (half-points) ─────────────────────────
 const HEADING_SIZE_MAP: Record<1 | 2 | 3 | 4 | 5 | 6, number> = {
   1: 52,
   2: 40,
@@ -293,7 +306,7 @@ const HEADING_SIZE_MAP: Record<1 | 2 | 3 | 4 | 5 | 6, number> = {
   6: 22,
 }
 
-// ── Block token → docx Paragraph(s) ──────────────────────────
+// ── Block token → docx element(s) ────────────────────────────
 function blockToParagraphs(token: BlockToken): (Paragraph | Table)[] {
   switch (token.type) {
     case 'heading':
@@ -609,8 +622,8 @@ export async function exportToWord(
   })
 
   const blob = await Packer.toBlob(doc)
-  const safeTitle =
-    title.replace(/[^a-zA-Zа-яА-Я0-9\s-]/g, '').trim() || 'document'
 
+  // ── ИСПРАВЛЕНО: усиленная санитизация имени файла ────────────
+  const safeTitle = sanitizeFileName(title)
   saveAs(blob, `${safeTitle}.docx`)
 }

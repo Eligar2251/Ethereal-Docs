@@ -1,3 +1,5 @@
+'use client'
+
 import { createBrowserClient } from '@supabase/ssr'
 
 let _client: ReturnType<typeof createBrowserClient> | null = null

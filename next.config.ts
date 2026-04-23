@@ -1,41 +1,42 @@
 import type { NextConfig } from 'next'
 
+// ── Dev/Prod режим ───────────────────────────────────────────
+const isDev = process.env.NODE_ENV === 'development'
+
 // ── Content Security Policy ──────────────────────────────────
-// Определяем отдельно для читаемости
 const CSP = [
-  // Базовый fallback — ничего не разрешаем по умолчанию
+  // Базовый fallback
   `default-src 'self'`,
 
-  // Скрипты — только свои + Next.js inline (нужен для HMR в dev)
-  // 'unsafe-eval' нужен для CodeMirror в dev режиме
-  `script-src 'self' 'unsafe-inline' 'unsafe-eval'`,
+  // В production убираем unsafe-eval (нужен только для HMR в dev)
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
 
-  // Стили — unsafe-inline нужен для CSS-in-JS и CSS Modules
+  // Стили — unsafe-inline нужен для CSS Modules
   `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com`,
 
-  // Шрифты — Google Fonts + свои
-  `font-src 'self' https://fonts.gstatic.com`,
+  // Шрифты
+  `font-src 'self' https://fonts.gstatic.com data:`,
 
-  // Изображения — свои + Supabase Storage + data: для аватаров
+  // Изображения
   `img-src 'self' blob: data: https://*.supabase.co`,
 
-  // API запросы — свои + Supabase REST + WebSocket для Realtime
+  // API запросы + Supabase WebSocket
   `connect-src 'self' https://*.supabase.co wss://*.supabase.co`,
 
-  // Фреймы — полностью запрещены
+  // Фреймы — запрещены
   `frame-src 'none'`,
   `frame-ancestors 'none'`,
 
-  // Объекты (Flash и т.п.) — запрещены
+  // Объекты — запрещены
   `object-src 'none'`,
 
-  // base-href — только свой домен
+  // base-href
   `base-uri 'self'`,
 
-  // form-action — только свой домен
+  // form-action
   `form-action 'self'`,
 
-  // Обновление небезопасных запросов до HTTPS
+  // HTTPS
   `upgrade-insecure-requests`,
 ]
   .join('; ')
@@ -58,7 +59,6 @@ const nextConfig: NextConfig = {
       {
         source: '/(.*)',
         headers: [
-          // ── Уже были ────────────────────────────────────────
           {
             key: 'X-Content-Type-Options',
             value: 'nosniff',
@@ -67,32 +67,28 @@ const nextConfig: NextConfig = {
             key: 'X-Frame-Options',
             value: 'DENY',
           },
+          // ── ИСПРАВЛЕНО: X-XSS-Protection deprecated, ставим 0 ──
+          // Современные браузеры его игнорируют или он сам создаёт
+          // уязвимости. CSP уже обеспечивает защиту от XSS.
           {
             key: 'X-XSS-Protection',
-            value: '1; mode=block',
+            value: '0',
           },
           {
             key: 'Referrer-Policy',
             value: 'strict-origin-when-cross-origin',
           },
-
-          // ── ДОБАВЛЕНО ────────────────────────────────────────
-
-          // HSTS — принудительный HTTPS на 1 год
-          // includeSubDomains — все поддомены тоже
-          // preload — включение в браузерный preload list
+          // HSTS
           {
             key: 'Strict-Transport-Security',
             value: 'max-age=31536000; includeSubDomains; preload',
           },
-
-          // CSP — главная защита от XSS
+          // CSP — с разделением dev/prod
           {
             key: 'Content-Security-Policy',
             value: CSP,
           },
-
-          // Permissions Policy — отключаем неиспользуемые API браузера
+          // Permissions Policy
           {
             key: 'Permissions-Policy',
             value: [
@@ -108,32 +104,29 @@ const nextConfig: NextConfig = {
               'accelerometer=()',
             ].join(', '),
           },
-
-          // CORP — защита от cross-origin утечек данных
+          // CORP
           {
             key: 'Cross-Origin-Resource-Policy',
             value: 'same-origin',
           },
-
-          // COOP — изолирует browsing context группу
-          // Защита от Spectre-подобных атак
+          // COOP
           {
             key: 'Cross-Origin-Opener-Policy',
             value: 'same-origin',
           },
-
-          // COEP — требует явного разрешения для cross-origin ресурсов
-          // Включаем только если все внешние ресурсы поддерживают CORS
-          // Пока ставим require-corp — если сломает шрифты, убери
+          // ── ИСПРАВЛЕНО: require-corp → credentialless ──────────
+          // require-corp блокирует Google Fonts (fonts.gstatic.com
+          // не отдаёт CORP заголовок). credentialless разрешает
+          // cross-origin ресурсы без credentials и совместим с
+          // Google Fonts и Supabase Storage.
           {
             key: 'Cross-Origin-Embedder-Policy',
-            value: 'require-corp',
+            value: 'credentialless',
           },
         ],
       },
 
-      // ── Отдельные правила для статики ───────────────────────
-      // Статические файлы кэшируем агрессивно
+      // Статика — агрессивное кэширование
       {
         source: '/_next/static/(.*)',
         headers: [
@@ -141,7 +134,6 @@ const nextConfig: NextConfig = {
             key: 'Cache-Control',
             value: 'public, max-age=31536000, immutable',
           },
-          // Статике не нужен CSP
           {
             key: 'Cross-Origin-Resource-Policy',
             value: 'same-origin',
@@ -149,11 +141,10 @@ const nextConfig: NextConfig = {
         ],
       },
 
-      // ── SVG иконки — отдельная политика ─────────────────────
+      // SVG — отдельная CSP политика
       {
         source: '/(.*).svg',
         headers: [
-          // SVG могут содержать скрипты — блокируем выполнение
           {
             key: 'Content-Security-Policy',
             value: `default-src 'none'; style-src 'unsafe-inline'`,

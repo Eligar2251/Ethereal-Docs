@@ -1,38 +1,56 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logSecurityEvent } from '@/lib/securityLog'
 
 /**
  * Валидирует параметр `next` — разрешает только внутренние пути.
+ *
  * Защита от open redirect атак:
- *   //evil.com  → /
- *   /\evil.com  → /
- *   https://evil.com → /
- *   /editor     → /editor  ✅
+ *   //evil.com   → /
+ *   /\evil.com   → /
+ *   https://evil → /
+ *   /editor      → /editor ✅
  */
 function sanitizeRedirectPath(next: string | null): string {
   if (!next) return '/'
 
   try {
-    // Убираем лишние пробелы
     const trimmed = next.trim()
 
-    // Разрешаем только пути начинающиеся с одного /
-    // Запрещаем // (protocol-relative) и /\ (path traversal)
-    if (!trimmed.startsWith('/') || trimmed.startsWith('//') || trimmed.startsWith('/\\')) {
+    // Разрешаем только пути начинающиеся строго с одного /
+    if (
+      !trimmed.startsWith('/') ||
+      trimmed.startsWith('//') ||
+      trimmed.startsWith('/\\')
+    ) {
+      // ── ИСПРАВЛЕНО: логируем попытку open redirect ───────────
+      logSecurityEvent('open-redirect-attempt', {
+        attempted: trimmed,
+        source: 'auth-callback',
+      })
       return '/'
     }
 
-    // Проверяем через URL API — путь должен быть внутренним
+    // Проверяем через URL API
     const url = new URL(trimmed, 'http://localhost')
 
-    // Если origin изменился — это внешний редирект
     if (url.origin !== 'http://localhost') {
+      logSecurityEvent('open-redirect-attempt', {
+        attempted: trimmed,
+        resolvedOrigin: url.origin,
+        source: 'auth-callback',
+      })
       return '/'
     }
 
-    // Разрешаем только безопасные пути (буквы, цифры, /, -, _, .)
+    // Только безопасные символы в пути
     const safePath = /^[a-zA-Z0-9\-_/.?=&%#]+$/
     if (!safePath.test(trimmed)) {
+      logSecurityEvent('open-redirect-attempt', {
+        attempted: trimmed,
+        reason: 'unsafe-characters',
+        source: 'auth-callback',
+      })
       return '/'
     }
 
@@ -47,7 +65,6 @@ export async function GET(request: Request) {
   const code = searchParams.get('code')
   const rawNext = searchParams.get('next')
 
-  // ── ИСПРАВЛЕНО: санитизация пути редиректа ──────────────────
   const next = sanitizeRedirectPath(rawNext)
 
   if (code) {
@@ -57,7 +74,15 @@ export async function GET(request: Request) {
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`)
     }
+
+    // ── ИСПРАВЛЕНО: логируем неудачную попытку auth ──────────
+    logSecurityEvent('auth-callback-failed', {
+      error: error.message,
+      code: error.status,
+    })
   }
 
-  return NextResponse.redirect(`${origin}/auth/login?error=auth_callback_failed`)
+  return NextResponse.redirect(
+    `${origin}/auth/login?error=auth_callback_failed`
+  )
 }

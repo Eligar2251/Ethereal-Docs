@@ -4,21 +4,17 @@ import {
   useState,
   useCallback,
   useMemo,
-  useEffect,
   useTransition,
   memo,
 } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
 import {
   FileText,
   Plus,
   Search,
   LogOut,
-  User,
 } from 'lucide-react'
 import { DocItem } from './DocItem'
 import { signOut } from '@/app/auth/actions'
-import { createClient } from '@/lib/supabase/client'
 import type { DocumentSummary, Profile } from '@/types/database'
 import styles from './Sidebar.module.css'
 
@@ -26,25 +22,13 @@ interface SidebarProps {
   documents: DocumentSummary[]
   activeDocumentId: string | null
   profile: Profile | null
+  userEmail: string
   onSelectDocument: (id: string) => void
   onCreateDocument: () => Promise<string | null>
   onDeleteDocument: (id: string) => void
   isLoading?: boolean
 }
 
-// ── Sidebar collapse animation ────────────────────────────────
-const sidebarVariants = {
-  open: {
-    x: 0,
-    transition: { type: 'spring' as const, stiffness: 300, damping: 30 },
-  },
-  closed: {
-    x: '-100%',
-    transition: { type: 'spring' as const, stiffness: 300, damping: 30 },
-  },
-}
-
-// ── Skeleton loader ───────────────────────────────────────────
 function SkeletonList() {
   return (
     <div className={styles.skeleton}>
@@ -59,24 +43,29 @@ function SkeletonList() {
   )
 }
 
-// ── User avatar initials ──────────────────────────────────────
 function getInitials(name: string | null, email: string): string {
   if (name) {
     return name
       .split(' ')
+      .filter(Boolean)
       .map(p => p[0])
       .join('')
       .toUpperCase()
       .slice(0, 2)
   }
-  return email[0].toUpperCase()
+
+  if (email) {
+    return email[0].toUpperCase()
+  }
+
+  return 'U'
 }
 
-// ── Main Component ────────────────────────────────────────────
 function SidebarInner({
   documents,
   activeDocumentId,
   profile,
+  userEmail,
   onSelectDocument,
   onCreateDocument,
   onDeleteDocument,
@@ -85,27 +74,17 @@ function SidebarInner({
   const [search, setSearch] = useState('')
   const [isCreating, startCreateTransition] = useTransition()
   const [isSigningOut, startSignOutTransition] = useTransition()
-  const [userEmail, setUserEmail] = useState<string>('')
 
-  // Fetch email on mount
-  useEffect(() => {
-    const supabase = createClient()
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user?.email) setUserEmail(data.user.email)
-    })
-  }, [])
-
-  // ── Filtered docs ──────────────────────────────────────────
   const filteredDocs = useMemo(() => {
     if (!search.trim()) return documents
     const q = search.toLowerCase()
+
     return documents.filter(d =>
       d.title.toLowerCase().includes(q) ||
       d.content_preview?.toLowerCase().includes(q)
     )
   }, [documents, search])
 
-  // ── Handlers ──────────────────────────────────────────────
   const handleCreate = useCallback(() => {
     startCreateTransition(async () => {
       const newId = await onCreateDocument()
@@ -120,10 +99,10 @@ function SidebarInner({
   }, [])
 
   const initials = getInitials(profile?.display_name ?? null, userEmail)
+  const fallbackName = userEmail ? userEmail.split('@')[0] : 'Account'
 
   return (
     <aside className={styles.root} aria-label="Document sidebar">
-      {/* ── Header ── */}
       <div className={styles.header}>
         <div className={styles.logo} aria-label="Ethereal Docs">
           <div className={styles.logoMark} aria-hidden="true">
@@ -144,7 +123,6 @@ function SidebarInner({
         </button>
       </div>
 
-      {/* ── Search ── */}
       <div className={styles.searchWrap}>
         <div className={styles.searchWrapInner}>
           <Search
@@ -164,12 +142,12 @@ function SidebarInner({
         </div>
       </div>
 
-      {/* ── Section label ── */}
       <p className={styles.sectionLabel}>
-        {search ? `${filteredDocs.length} result${filteredDocs.length !== 1 ? 's' : ''}` : 'Documents'}
+        {search
+          ? `${filteredDocs.length} result${filteredDocs.length !== 1 ? 's' : ''}`
+          : 'Documents'}
       </p>
 
-      {/* ── Document list ── */}
       <div
         className={styles.list}
         role="list"
@@ -208,7 +186,6 @@ function SidebarInner({
         )}
       </div>
 
-      {/* ── User footer ── */}
       <div className={styles.footer}>
         <div className={styles.userAvatar} aria-hidden="true">
           {profile?.avatar_url ? (
@@ -228,7 +205,7 @@ function SidebarInner({
 
         <div className={styles.userInfo}>
           <p className={styles.userName}>
-            {profile?.display_name ?? userEmail.split('@')[0]}
+            {profile?.display_name ?? fallbackName}
           </p>
           <p className={styles.userEmail}>{userEmail}</p>
         </div>

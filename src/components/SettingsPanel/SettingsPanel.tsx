@@ -65,7 +65,12 @@ const THEMES: { value: AppTheme; label: string; swatchClass: string }[] = [
   { value: 'sepia', label: 'Sepia', swatchClass: styles.swatchSepia },
 ]
 
-const FONTS: { value: AppFont; label: string; sample: string; sampleClass: string }[] = [
+const FONTS: {
+  value: AppFont
+  label: string
+  sample: string
+  sampleClass: string
+}[] = [
   {
     value: 'serif',
     label: 'Serif',
@@ -79,6 +84,19 @@ const FONTS: { value: AppFont; label: string; sample: string; sampleClass: strin
     sampleClass: styles.fontSampleSans,
   },
 ]
+
+// ── ИСПРАВЛЕНО: белые списки допустимых значений ─────────────
+const VALID_THEMES = new Set<AppTheme>(['light', 'dark', 'sepia'])
+const VALID_FONTS = new Set<AppFont>(['serif', 'sans'])
+
+function isValidSettings(s: DocumentSettings): boolean {
+  return (
+    VALID_THEMES.has(s.theme) &&
+    VALID_FONTS.has(s.font) &&
+    typeof s.focusMode === 'boolean' &&
+    ['split', 'preview', 'write'].includes(s.editorMode)
+  )
+}
 
 const savedStateStyle: CSSProperties = {
   display: 'flex',
@@ -94,13 +112,7 @@ interface ToggleSwitchProps {
   hint?: string
 }
 
-function ToggleSwitch({
-  id,
-  checked,
-  onChange,
-  label,
-  hint,
-}: ToggleSwitchProps) {
+function ToggleSwitch({ id, checked, onChange, label, hint }: ToggleSwitchProps) {
   return (
     <div className={styles.toggleRow}>
       <div className={styles.toggleLabel}>
@@ -139,11 +151,13 @@ function SettingsPanelInner({
   const [localSettings, setLocalSettings] = useState<DocumentSettings>(currentSettings)
   const [isSaving, startSaveTransition] = useTransition()
   const [savedFlash, setSavedFlash] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const focusModeId = useId()
 
   const handleOpen = useCallback(() => {
     setLocalSettings(currentSettings)
+    setSaveError(null)
   }, [currentSettings])
 
   const update = useCallback(
@@ -155,32 +169,56 @@ function SettingsPanelInner({
 
   const handleSave = useCallback(() => {
     startSaveTransition(async () => {
+      setSaveError(null)
+
       const supabase = createClient()
 
-      const { error } = await supabase
+      // ── ИСПРАВЛЕНО: получаем user и добавляем user_id проверку ──
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        setSaveError('Not authenticated')
+        return
+      }
+
+      // ── ИСПРАВЛЕНО: валидация settings перед сохранением ─────
+      if (!isValidSettings(localSettings)) {
+        setSaveError('Invalid settings values')
+        return
+      }
+
+      // Обновляем документ с проверкой user_id
+      const { error: docError } = await supabase
         .from('documents')
         .update({ settings: localSettings })
         .eq('id', documentId)
+        .eq('user_id', user.id) // ← ИСПРАВЛЕНО: добавлена проверка владельца
 
-      if (!error) {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
-
-        if (user) {
-          await supabase
-            .from('profiles')
-            .update({
-              theme: localSettings.theme,
-              font: localSettings.font,
-            })
-            .eq('id', user.id)
-        }
-
-        onSettingsChange(localSettings)
-        setSavedFlash(true)
-        setTimeout(() => setSavedFlash(false), 1500)
+      if (docError) {
+        setSaveError('Failed to save settings')
+        console.error('[SettingsPanel] Doc update failed:', docError.message)
+        return
       }
+
+      // Обновляем профиль пользователя
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          theme: localSettings.theme,
+          font: localSettings.font,
+        })
+        .eq('id', user.id)
+
+      if (profileError) {
+        // Не критично — документ уже сохранён
+        console.warn('[SettingsPanel] Profile update failed:', profileError.message)
+      }
+
+      onSettingsChange(localSettings)
+      setSavedFlash(true)
+      setTimeout(() => setSavedFlash(false), 1500)
     })
   }, [documentId, localSettings, onSettingsChange])
 
@@ -227,6 +265,7 @@ function SettingsPanelInner({
             </div>
 
             <div className={styles.panelBody}>
+              {/* ── Theme section ── */}
               <section className={styles.section}>
                 <p className={styles.sectionLabel}>Theme</p>
                 <div
@@ -236,7 +275,6 @@ function SettingsPanelInner({
                 >
                   {THEMES.map(({ value, label, swatchClass }) => {
                     const isActive = localSettings.theme === value
-
                     return (
                       <button
                         key={value}
@@ -277,7 +315,6 @@ function SettingsPanelInner({
                             )}
                           </AnimatePresence>
                         </div>
-
                         <span className={styles.swatchLabel}>{label}</span>
                       </button>
                     )
@@ -287,6 +324,7 @@ function SettingsPanelInner({
 
               <div className={styles.divider} aria-hidden="true" />
 
+              {/* ── Font section ── */}
               <section className={styles.section}>
                 <p className={styles.sectionLabel}>Font Style</p>
                 <div
@@ -296,7 +334,6 @@ function SettingsPanelInner({
                 >
                   {FONTS.map(({ value, label, sample, sampleClass }) => {
                     const isActive = localSettings.font === value
-
                     return (
                       <button
                         key={value}
@@ -326,6 +363,7 @@ function SettingsPanelInner({
 
               <div className={styles.divider} aria-hidden="true" />
 
+              {/* ── Writing section ── */}
               <section className={styles.section}>
                 <p className={styles.sectionLabel}>Writing</p>
                 <ToggleSwitch
@@ -340,7 +378,11 @@ function SettingsPanelInner({
 
             <div className={styles.panelFooter}>
               <span className={styles.footerHint}>
-                Settings apply to this document.
+                {saveError ? (
+                  <span style={{ color: '#DC2626' }}>{saveError}</span>
+                ) : (
+                  'Settings apply to this document.'
+                )}
               </span>
 
               <button

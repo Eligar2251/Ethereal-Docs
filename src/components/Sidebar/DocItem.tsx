@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useCallback } from 'react'
+import { memo, useCallback, useEffect, useState } from 'react'
 import { motion, Variants } from 'framer-motion'
 import { Trash2 } from 'lucide-react'
 import type { DocumentSummary } from '@/types/database'
@@ -50,6 +50,18 @@ function DocItemInner({
   onDelete,
   animationDelay,
 }: DocItemProps) {
+  const [relativeDate, setRelativeDate] = useState<string | null>(null)
+
+  useEffect(() => {
+    setRelativeDate(formatRelativeDate(doc.updated_at))
+
+    const interval = setInterval(() => {
+      setRelativeDate(formatRelativeDate(doc.updated_at))
+    }, 60_000)
+
+    return () => clearInterval(interval)
+  }, [doc.updated_at])
+
   const handleSelect = useCallback(() => {
     onSelect(doc.id)
   }, [doc.id, onSelect])
@@ -106,8 +118,9 @@ function DocItemInner({
         <span className={styles.docTitle}>
           {doc.title || 'Untitled Document'}
         </span>
+
         <span className={styles.docMeta}>
-          {formatRelativeDate(doc.updated_at)} · {preview}
+          {relativeDate ? `${relativeDate} · ${preview}` : preview}
         </span>
       </div>
 
