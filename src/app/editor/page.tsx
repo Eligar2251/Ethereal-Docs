@@ -6,14 +6,12 @@ import type { Document, DocumentSummary, Profile } from '@/types/database'
 export default async function EditorPage() {
   const supabase = await createClient()
 
-  // ── Auth guard ─────────────────────────────────────────────
   const {
     data: { user },
   } = await supabase.auth.getUser()
 
   if (!user) redirect('/auth/login')
 
-  // ── Fetch documents summary (fast list) ────────────────────
   const { data: documents } = await supabase
     .from('documents_summary')
     .select('*')
@@ -21,14 +19,12 @@ export default async function EditorPage() {
     .order('updated_at', { ascending: false })
     .limit(100)
 
-  // ── Fetch user profile ─────────────────────────────────────
   const { data: profile } = await supabase
     .from('profiles')
     .select('*')
     .eq('id', user.id)
     .single()
 
-  // ── ИСПРАВЛЕНО: первый документ грузим на сервере ──────────
   let initialActiveDocument: Document | null = null
 
   if (documents && documents.length > 0) {
@@ -50,6 +46,7 @@ export default async function EditorPage() {
       initialActiveDocument={initialActiveDocument}
       profile={profile as Profile | null}
       userEmail={user.email ?? ''}
+      userId={user.id}
     />
   )
 }

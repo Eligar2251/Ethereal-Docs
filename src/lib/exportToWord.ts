@@ -6,242 +6,217 @@ import {
   HeadingLevel,
   AlignmentType,
   BorderStyle,
-  ShadingType,
   Table,
   TableRow,
   TableCell,
   WidthType,
   LevelFormat,
   convertInchesToTwip,
+  convertMillimetersToTwip,
   UnderlineType,
+  ExternalHyperlink,
+  TabStopPosition,
+  TabStopType,
 } from 'docx'
 import { saveAs } from 'file-saver'
 
-// ── Типы токенов парсера ───────────────────────────────────────
+// ── Константы шрифтов и размеров ─────────────────────────────
+const FONT_MAIN = 'Times New Roman'
+const FONT_MONO = 'Courier New'
+
+// Размеры в half-points (1pt = 2 half-points)
+const SIZE_BODY = 28       // 14pt
+const SIZE_BODY_SMALL = 24 // 12pt
+const SIZE_H1 = 32         // 16pt
+const SIZE_H2 = 30         // 15pt
+const SIZE_H3 = 28         // 14pt
+const SIZE_H4 = 28         // 14pt
+const SIZE_CODE = 24       // 12pt
+
+// ГОСТ отступы (в mm → twip)
+const MARGIN_TOP    = convertMillimetersToTwip(20)
+const MARGIN_BOTTOM = convertMillimetersToTwip(20)
+const MARGIN_LEFT   = convertMillimetersToTwip(30)
+const MARGIN_RIGHT  = convertMillimetersToTwip(15)
+
+// Отступ первой строки абзаца — 1.25 см
+const FIRST_LINE_INDENT = convertMillimetersToTwip(12.5)
+
+// Межстрочный интервал 1.5 = 360 twip (240 * 1.5)
+const LINE_SPACING = 360
+
+// Интервал до/после абзаца — 0
+const SPACING_BEFORE = 0
+const SPACING_AFTER = 0
+
+// ── Типы токенов ──────────────────────────────────────────────
 type InlineToken =
-  | { type: 'text'; text: string }
-  | { type: 'bold'; text: string }
-  | { type: 'italic'; text: string }
+  | { type: 'text';       text: string }
+  | { type: 'bold';       text: string }
+  | { type: 'italic';     text: string }
   | { type: 'boldItalic'; text: string }
-  | { type: 'strike'; text: string }
-  | { type: 'code'; text: string }
-  | { type: 'link'; text: string; href: string }
+  | { type: 'strike';     text: string }
+  | { type: 'code';       text: string }
+  | { type: 'link';       text: string; href: string }
 
 type BlockToken =
-  | { type: 'heading'; level: 1 | 2 | 3 | 4 | 5 | 6; text: string }
-  | { type: 'paragraph'; inlines: InlineToken[] }
-  | { type: 'blockquote'; text: string }
+  | { type: 'heading';    level: 1 | 2 | 3 | 4 | 5 | 6; text: string }
+  | { type: 'paragraph';  inlines: InlineToken[] }
+  | { type: 'blockquote'; inlines: InlineToken[] }
   | { type: 'code_block'; code: string; lang: string }
   | { type: 'hr' }
-  | { type: 'blank' }
-  | { type: 'bullet'; text: string; depth: number }
-  | { type: 'ordered'; text: string; depth: number; num: number }
-  | { type: 'task'; text: string; checked: boolean }
-  | { type: 'table'; headers: string[]; rows: string[][] }
+  | { type: 'bullet';     text: string; depth: number }
+  | { type: 'ordered';    text: string; depth: number; num: number }
+  | { type: 'task';       text: string; checked: boolean }
+  | { type: 'table';      headers: string[]; rows: string[][] }
 
 type DocxHeadingLevel = (typeof HeadingLevel)[keyof typeof HeadingLevel]
+type Child = TextRun | ExternalHyperlink
 
-// ── ИСПРАВЛЕНО: Whitelist безопасных протоколов для ссылок ────
-const SAFE_HREF_RE = /^(https?:|mailto:|#|\/)/i
+// ── Утилиты ───────────────────────────────────────────────────
 
-function sanitizeHref(href: string): string {
-  if (SAFE_HREF_RE.test(href.trim())) {
-    return href.trim()
-  }
-  // Небезопасные протоколы (javascript:, data:, vbscript:) → заглушка
-  return '#'
-}
-
-// ── ИСПРАВЛЕНО: Санитизация имени файла ──────────────────────
 function sanitizeFileName(name: string): string {
-  return name
-    .replace(/[^a-zA-Zа-яА-ЯёЁ0-9\s\-_]/g, '') // только безопасные символы
-    .replace(/\.\./g, '')                          // path traversal защита
-    .replace(/[/\\]/g, '')                          // слэши
-    .replace(/\s+/g, ' ')                           // нормализация пробелов
-    .trim()
-    .slice(0, 100)                                  // ограничение длины
-    || 'document'
+  return (
+    name
+      .replace(/[<>:"/\\|?*]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 100) || 'document'
+  )
 }
 
-// ── Парсер inline-разметки ────────────────────────────────────
+function sanitizeHref(href: string): string | null {
+  const trimmed = href.trim()
+  if (/^(https?:|mailto:)/i.test(trimmed)) return trimmed
+  return null
+}
+
+function isTableSeparator(line: string): boolean {
+  return /^\|?[\s:-|]+\|?$/.test(line.trim())
+}
+
+function parseTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map(c => c.trim())
+}
+
+// ── Inline парсер ─────────────────────────────────────────────
+
 function parseInline(text: string): InlineToken[] {
   const tokens: InlineToken[] = []
   const pattern =
     /(\*\*\*|___)(.*?)\1|(\*\*|__)(.*?)\3|(\*|_)(.*?)\5|(~~)(.*?)\7|(`)(.*?)\9|\[([^\]]+)\]\(([^)]+)\)/g
 
-  let lastIndex = 0
-  let match: RegExpExecArray | null
+  let last = 0
+  let m: RegExpExecArray | null
 
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      tokens.push({ type: 'text', text: text.slice(lastIndex, match.index) })
+  while ((m = pattern.exec(text)) !== null) {
+    if (m.index > last) {
+      tokens.push({ type: 'text', text: text.slice(last, m.index) })
     }
 
-    if (match[1]) {
-      tokens.push({ type: 'boldItalic', text: match[2] })
-    } else if (match[3]) {
-      tokens.push({ type: 'bold', text: match[4] })
-    } else if (match[5]) {
-      tokens.push({ type: 'italic', text: match[6] })
-    } else if (match[7]) {
-      tokens.push({ type: 'strike', text: match[8] })
-    } else if (match[9]) {
-      tokens.push({ type: 'code', text: match[10] })
-    } else if (match[11] !== undefined) {
-      tokens.push({
-        type: 'link',
-        text: match[11],
-        // ── ИСПРАВЛЕНО: санитизация href при парсинге ──────────
-        href: sanitizeHref(match[12]),
-      })
-    }
+    if      (m[1])                tokens.push({ type: 'boldItalic', text: m[2] })
+    else if (m[3])                tokens.push({ type: 'bold',       text: m[4] })
+    else if (m[5])                tokens.push({ type: 'italic',     text: m[6] })
+    else if (m[7])                tokens.push({ type: 'strike',     text: m[8] })
+    else if (m[9])                tokens.push({ type: 'code',       text: m[10] })
+    else if (m[11] !== undefined) tokens.push({ type: 'link',       text: m[11], href: m[12] })
 
-    lastIndex = pattern.lastIndex
+    last = pattern.lastIndex
   }
 
-  if (lastIndex < text.length) {
-    tokens.push({ type: 'text', text: text.slice(lastIndex) })
+  if (last < text.length) {
+    tokens.push({ type: 'text', text: text.slice(last) })
   }
 
   return tokens.length ? tokens : [{ type: 'text', text }]
 }
 
-// ── Inline token → TextRun ────────────────────────────────────
-function tokenToRun(token: InlineToken): TextRun {
-  const base = {
-    font: 'Calibri',
-    size: 24,
-  }
+// ── Block парсер ──────────────────────────────────────────────
 
-  switch (token.type) {
-    case 'bold':
-      return new TextRun({ ...base, text: token.text, bold: true })
-
-    case 'italic':
-      return new TextRun({ ...base, text: token.text, italics: true })
-
-    case 'boldItalic':
-      return new TextRun({ ...base, text: token.text, bold: true, italics: true })
-
-    case 'strike':
-      return new TextRun({ ...base, text: token.text, strike: true })
-
-    case 'code':
-      return new TextRun({
-        text: token.text,
-        font: 'Courier New',
-        size: 20,
-        shading: {
-          type: ShadingType.SOLID,
-          color: 'F0F0F0',
-          fill: 'F0F0F0',
-        },
-      })
-
-    case 'link':
-      // ── ИСПРАВЛЕНО: href уже санитизирован в parseInline ─────
-      // Отображаем как текст со стилем ссылки (без гиперссылки в docx
-      // для небезопасных URL — sanitizeHref уже заменил их на #)
-      return new TextRun({
-        ...base,
-        text: token.text,
-        color: '0563C1',
-        underline: { type: UnderlineType.SINGLE },
-      })
-
-    default:
-      return new TextRun({ ...base, text: (token as { text: string }).text })
-  }
-}
-
-// ── Парсер блоков Markdown ────────────────────────────────────
 function parseBlocks(markdown: string): BlockToken[] {
-  const lines = markdown.split('\n')
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n')
   const blocks: BlockToken[] = []
   let i = 0
+  let buffer: string[] = []
 
-  function tryParseTable(
-    startIdx: number
-  ): { token: BlockToken; consumed: number } | null {
-    const headerLine = lines[startIdx]
-    if (!headerLine?.includes('|')) return null
-
-    const sepLine = lines[startIdx + 1] ?? ''
-    if (!/^\|?[\s\-:|]+\|/.test(sepLine)) return null
-
-    const parseRow = (line: string) =>
-      line.replace(/^\||\|$/g, '').split('|').map(c => c.trim())
-
-    const headers = parseRow(headerLine)
-    const rows: string[][] = []
-    let j = startIdx + 2
-
-    while (j < lines.length && lines[j].includes('|')) {
-      rows.push(parseRow(lines[j]))
-      j++
-    }
-
-    return {
-      token: { type: 'table', headers, rows },
-      consumed: j - startIdx,
-    }
+  function flush() {
+    if (!buffer.length) return
+    const text = buffer.join(' ').trim()
+    if (text) blocks.push({ type: 'paragraph', inlines: parseInline(text) })
+    buffer = []
   }
 
   while (i < lines.length) {
-    const line = lines[i]
+    const raw = lines[i]
+    const trimmed = raw.trim()
 
-    if (line.trim() === '') {
-      blocks.push({ type: 'blank' })
+    // Пустая строка — конец абзаца
+    if (trimmed === '') {
+      flush()
       i++
       continue
     }
 
-    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/)
-    if (headingMatch) {
+    // Заголовки
+    const hMatch = raw.match(/^(#{1,6})\s+(.+)$/)
+    if (hMatch) {
+      flush()
       blocks.push({
         type: 'heading',
-        level: headingMatch[1].length as 1 | 2 | 3 | 4 | 5 | 6,
-        text: headingMatch[2],
+        level: hMatch[1].length as 1 | 2 | 3 | 4 | 5 | 6,
+        text: hMatch[2].trim(),
       })
       i++
       continue
     }
 
-    if (/^[-*_]{3,}\s*$/.test(line.trim())) {
+    // Горизонтальная черта
+    if (/^[-*_]{3,}\s*$/.test(trimmed)) {
+      flush()
       blocks.push({ type: 'hr' })
       i++
       continue
     }
 
-    if (line.startsWith('>')) {
-      const text = line.replace(/^>\s?/, '')
-      blocks.push({ type: 'blockquote', text })
+    // Блок кода
+    if (raw.startsWith('```')) {
+      flush()
+      const lang = raw.slice(3).trim()
+      const code: string[] = []
       i++
+      while (i < lines.length && !lines[i].startsWith('```')) {
+        code.push(lines[i])
+        i++
+      }
+      if (i < lines.length) i++ // закрывающий ```
+      blocks.push({ type: 'code_block', code: code.join('\n'), lang })
       continue
     }
 
-    if (line.startsWith('```')) {
-      const lang = line.slice(3).trim()
-      const codeLines: string[] = []
-      i++
-
-      while (i < lines.length && !lines[i].startsWith('```')) {
-        codeLines.push(lines[i])
+    // Цитата
+    if (trimmed.startsWith('>')) {
+      flush()
+      const quoteLines: string[] = []
+      while (i < lines.length && lines[i].trim().startsWith('>')) {
+        quoteLines.push(lines[i].replace(/^>\s?/, '').trim())
         i++
       }
-      i++
-
       blocks.push({
-        type: 'code_block',
-        code: codeLines.join('\n'),
-        lang,
+        type: 'blockquote',
+        inlines: parseInline(quoteLines.join(' ')),
       })
       continue
     }
 
-    const taskMatch = line.match(/^[-*]\s+\[(x| )\]\s+(.+)$/i)
+    // Task list
+    const taskMatch = raw.match(/^[-*]\s+\[(x| )\]\s+(.+)$/i)
     if (taskMatch) {
+      flush()
       blocks.push({
         type: 'task',
         checked: taskMatch[1].toLowerCase() === 'x',
@@ -251,44 +226,150 @@ function parseBlocks(markdown: string): BlockToken[] {
       continue
     }
 
-    const bulletMatch = line.match(/^(\s*)[-*+]\s+(.+)$/)
+    // Bullet list
+    const bulletMatch = raw.match(/^(\s*)[-*+]\s+(.+)$/)
     if (bulletMatch) {
-      const depth = Math.floor(bulletMatch[1].length / 2)
-      blocks.push({ type: 'bullet', text: bulletMatch[2], depth })
-      i++
-      continue
-    }
-
-    const orderedMatch = line.match(/^(\s*)(\d+)\.\s+(.+)$/)
-    if (orderedMatch) {
-      const depth = Math.floor(orderedMatch[1].length / 2)
+      flush()
       blocks.push({
-        type: 'ordered',
-        text: orderedMatch[3],
-        depth,
-        num: parseInt(orderedMatch[2], 10),
+        type: 'bullet',
+        text: bulletMatch[2],
+        depth: Math.min(3, Math.floor(bulletMatch[1].length / 2)),
       })
       i++
       continue
     }
 
-    const tableResult = tryParseTable(i)
-    if (tableResult) {
-      blocks.push(tableResult.token)
-      i += tableResult.consumed
+    // Ordered list
+    const ordMatch = raw.match(/^(\s*)(\d+)\.\s+(.+)$/)
+    if (ordMatch) {
+      flush()
+      blocks.push({
+        type: 'ordered',
+        text: ordMatch[3],
+        depth: Math.min(3, Math.floor(ordMatch[1].length / 2)),
+        num: parseInt(ordMatch[2], 10),
+      })
+      i++
       continue
     }
 
-    const inlines = parseInline(line)
-    blocks.push({ type: 'paragraph', inlines })
+    // Таблица
+    if (
+      raw.includes('|') &&
+      i + 1 < lines.length &&
+      isTableSeparator(lines[i + 1])
+    ) {
+      flush()
+      const headers = parseTableRow(raw)
+      const rows: string[][] = []
+      i += 2
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
+        rows.push(parseTableRow(lines[i]))
+        i++
+      }
+      blocks.push({ type: 'table', headers, rows })
+      continue
+    }
+
+    buffer.push(trimmed)
     i++
   }
 
+  flush()
   return blocks
 }
 
-// ── Heading maps ──────────────────────────────────────────────
-const HEADING_LEVEL_MAP: Record<1 | 2 | 3 | 4 | 5 | 6, DocxHeadingLevel> = {
+// ── Базовые настройки абзаца (ГОСТ) ──────────────────────────
+
+function baseParaProps(opts: {
+  firstLine?: boolean
+  align?: (typeof AlignmentType)[keyof typeof AlignmentType]
+  spacingBefore?: number
+  spacingAfter?: number
+} = {}) {
+  return {
+    alignment: opts.align ?? AlignmentType.BOTH,
+    indent: opts.firstLine !== false
+      ? { firstLine: FIRST_LINE_INDENT }
+      : undefined,
+    spacing: {
+      before: opts.spacingBefore ?? SPACING_BEFORE,
+      after:  opts.spacingAfter  ?? SPACING_AFTER,
+      line:   LINE_SPACING,
+      lineRule: 'auto' as const,
+    },
+  }
+}
+
+// ── Run-фабрика ───────────────────────────────────────────────
+
+interface RunOpts {
+  bold?:    boolean
+  italics?: boolean
+  strike?:  boolean
+  color?:   string
+  font?:    string
+  size?:    number
+  underline?: boolean
+}
+
+function run(text: string, opts: RunOpts = {}): TextRun {
+  return new TextRun({
+    text,
+    font:    opts.font    ?? FONT_MAIN,
+    size:    opts.size    ?? SIZE_BODY,
+    bold:    opts.bold    ?? false,
+    italics: opts.italics ?? false,
+    strike:  opts.strike  ?? false,
+    color:   opts.color   ?? '000000',
+    underline: opts.underline ? { type: UnderlineType.SINGLE } : undefined,
+  })
+}
+
+// ── Inline → docx Children ────────────────────────────────────
+
+function toChildren(inlines: InlineToken[], base: RunOpts = {}): Child[] {
+  return inlines.map(token => {
+    switch (token.type) {
+      case 'bold':
+        return run(token.text, { ...base, bold: true })
+
+      case 'italic':
+        return run(token.text, { ...base, italics: true })
+
+      case 'boldItalic':
+        return run(token.text, { ...base, bold: true, italics: true })
+
+      case 'strike':
+        return run(token.text, { ...base, strike: true })
+
+      case 'code':
+        return run(token.text, {
+          font:  FONT_MONO,
+          size:  SIZE_CODE,
+          color: '444444',
+        })
+
+      case 'link': {
+        const href = sanitizeHref(token.href)
+        const linkRun = run(token.text, {
+          ...base,
+          color:     '1155CC',
+          underline: true,
+        })
+        if (!href) return linkRun
+        return new ExternalHyperlink({ link: href, children: [linkRun] })
+      }
+
+      default:
+        return run((token as { text: string }).text, base)
+    }
+  })
+}
+
+// ── Heading level map ─────────────────────────────────────────
+
+const H_LEVEL: Record<1 | 2 | 3 | 4 | 5 | 6, DocxHeadingLevel> = {
   1: HeadingLevel.HEADING_1,
   2: HeadingLevel.HEADING_2,
   3: HeadingLevel.HEADING_3,
@@ -297,103 +378,110 @@ const HEADING_LEVEL_MAP: Record<1 | 2 | 3 | 4 | 5 | 6, DocxHeadingLevel> = {
   6: HeadingLevel.HEADING_6,
 }
 
-const HEADING_SIZE_MAP: Record<1 | 2 | 3 | 4 | 5 | 6, number> = {
-  1: 52,
-  2: 40,
-  3: 32,
-  4: 28,
-  5: 24,
-  6: 22,
+const H_SIZE: Record<1 | 2 | 3 | 4 | 5 | 6, number> = {
+  1: SIZE_H1,
+  2: SIZE_H2,
+  3: SIZE_H3,
+  4: SIZE_H4,
+  5: SIZE_BODY,
+  6: SIZE_BODY,
 }
 
-// ── Block token → docx element(s) ────────────────────────────
-function blockToParagraphs(token: BlockToken): (Paragraph | Table)[] {
+// ── Block → docx elements ─────────────────────────────────────
+
+function blockToElements(token: BlockToken): (Paragraph | Table)[] {
   switch (token.type) {
+
+    // ── Заголовки ─────────────────────────────────────────────
     case 'heading':
       return [
         new Paragraph({
-          heading: HEADING_LEVEL_MAP[token.level],
+          heading: H_LEVEL[token.level],
           children: [
-            new TextRun({
-              text: token.text,
-              bold: token.level <= 3,
-              size: HEADING_SIZE_MAP[token.level],
-              font: 'Garamond',
-              color: '1A1A1A',
+            run(token.text, {
+              bold:  true,
+              size:  H_SIZE[token.level],
+              color: '000000',
             }),
           ],
-          spacing: { before: 240, after: 120 },
+          alignment: AlignmentType.CENTER,
+          indent: undefined,
+          spacing: {
+            before: LINE_SPACING,
+            after:  LINE_SPACING,
+            line:   LINE_SPACING,
+            lineRule: 'auto',
+          },
         }),
       ]
 
+    // ── Обычный абзац ─────────────────────────────────────────
     case 'paragraph':
       return [
         new Paragraph({
-          children: token.inlines.map(tokenToRun),
-          spacing: { after: 160 },
+          children: toChildren(token.inlines),
+          ...baseParaProps(),
         }),
       ]
 
+    // ── Цитата ────────────────────────────────────────────────
     case 'blockquote':
       return [
         new Paragraph({
-          children: [
-            new TextRun({
-              text: token.text,
-              italics: true,
-              color: '555555',
-              font: 'Garamond',
-              size: 26,
-            }),
-          ],
-          indent: { left: convertInchesToTwip(0.5) },
+          children: toChildren(token.inlines, { italics: true, color: '444444' }),
+          ...baseParaProps({ firstLine: false }),
+          indent: {
+            left:  convertMillimetersToTwip(12.5),
+            right: convertMillimetersToTwip(12.5),
+          },
           border: {
             left: {
-              style: BorderStyle.THICK,
-              size: 12,
-              color: '1A1A1A',
-              space: 12,
+              style: BorderStyle.SINGLE,
+              size:  9,
+              color: 'AAAAAA',
+              space: 5,
             },
           },
-          shading: {
-            type: ShadingType.SOLID,
-            color: 'F7F7F5',
-            fill: 'F7F7F5',
-          },
-          spacing: { before: 160, after: 160 },
         }),
       ]
 
-    case 'code_block':
-      return [
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: token.code,
-              font: 'Courier New',
-              size: 18,
-              color: '1A1A1A',
-            }),
-          ],
-          shading: {
-            type: ShadingType.SOLID,
-            color: 'F0F0EE',
-            fill: 'F0F0EE',
-          },
-          border: {
-            top: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC' },
-            bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC' },
-            left: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC' },
-            right: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC' },
-          },
-          indent: {
-            left: convertInchesToTwip(0.25),
-            right: convertInchesToTwip(0.25),
-          },
-          spacing: { before: 160, after: 160, line: 276 },
-        }),
-      ]
+    // ── Блок кода ─────────────────────────────────────────────
+    case 'code_block': {
+      const result: Paragraph[] = []
+      const codeLines = token.code.split('\n')
 
+      codeLines.forEach((line, idx) => {
+        result.push(
+          new Paragraph({
+            children: [
+              run(
+                // Сохраняем отступы неразрывными пробелами
+                line.replace(/ /g, '\u00A0').replace(/\t/g, '\u00A0\u00A0\u00A0\u00A0') || '\u00A0',
+                {
+                  font:  FONT_MONO,
+                  size:  SIZE_CODE,
+                  color: '1A1A1A',
+                }
+              ),
+            ],
+            alignment: AlignmentType.LEFT,
+            indent: {
+              left: convertMillimetersToTwip(12.5),
+            },
+            spacing: {
+              before: idx === 0               ? LINE_SPACING / 2 : 0,
+              after:  idx === codeLines.length - 1 ? LINE_SPACING / 2 : 0,
+              line:   240,
+              lineRule: 'auto',
+            },
+          })
+        )
+      })
+
+      return result
+    }
+
+    // ── Горизонтальная черта ──────────────────────────────────
     case 'hr':
       return [
         new Paragraph({
@@ -401,106 +489,135 @@ function blockToParagraphs(token: BlockToken): (Paragraph | Table)[] {
           border: {
             bottom: {
               style: BorderStyle.SINGLE,
-              size: 6,
-              color: 'CCCCCC',
+              size:  4,
+              color: 'AAAAAA',
             },
           },
-          spacing: { before: 240, after: 240 },
+          spacing: {
+            before: LINE_SPACING,
+            after:  LINE_SPACING,
+            line:   LINE_SPACING,
+            lineRule: 'auto',
+          },
         }),
       ]
 
-    case 'blank':
-      return [new Paragraph({ children: [], spacing: { after: 80 } })]
-
+    // ── Маркированный список ──────────────────────────────────
     case 'bullet':
       return [
         new Paragraph({
-          children: parseInline(token.text).map(tokenToRun),
+          children: toChildren(parseInline(token.text)),
           bullet: { level: token.depth },
-          spacing: { after: 80 },
+          alignment: AlignmentType.BOTH,
+          indent: {
+            left:    convertMillimetersToTwip(12.5 + token.depth * 12.5),
+            hanging: convertMillimetersToTwip(6.25),
+          },
+          spacing: {
+            before: 0,
+            after:  0,
+            line:   LINE_SPACING,
+            lineRule: 'auto',
+          },
         }),
       ]
 
+    // ── Нумерованный список ───────────────────────────────────
     case 'ordered':
       return [
         new Paragraph({
-          children: parseInline(token.text).map(tokenToRun),
-          numbering: { reference: 'ordered-list', level: token.depth },
-          spacing: { after: 80 },
+          children: toChildren(parseInline(token.text)),
+          numbering: {
+            reference: 'ordered-list',
+            level: token.depth,
+          },
+          alignment: AlignmentType.BOTH,
+          indent: {
+            left:    convertMillimetersToTwip(12.5 + token.depth * 12.5),
+            hanging: convertMillimetersToTwip(6.25),
+          },
+          spacing: {
+            before: 0,
+            after:  0,
+            line:   LINE_SPACING,
+            lineRule: 'auto',
+          },
         }),
       ]
 
+    // ── Task list ─────────────────────────────────────────────
     case 'task':
       return [
         new Paragraph({
           children: [
-            new TextRun({
-              text: token.checked ? '☑ ' : '☐ ',
-              font: 'Segoe UI Symbol',
-              size: 22,
-              color: token.checked ? '16A34A' : '6B6B6B',
+            run(token.checked ? '[x] ' : '[ ] ', {
+              font:  FONT_MONO,
+              size:  SIZE_BODY_SMALL,
             }),
-            ...parseInline(token.text).map(tokenToRun),
+            ...toChildren(parseInline(token.text)),
           ],
-          spacing: { after: 80 },
+          ...baseParaProps({ firstLine: false }),
+          indent: {
+            left: convertMillimetersToTwip(12.5),
+          },
         }),
       ]
 
+    // ── Таблица ───────────────────────────────────────────────
     case 'table': {
-      const tableRows: TableRow[] = []
+      const border = {
+        style: BorderStyle.SINGLE,
+        size:  4,
+        color: '000000',
+      }
 
-      tableRows.push(
-        new TableRow({
-          children: token.headers.map(
-            h =>
-              new TableCell({
+      const headerRow = new TableRow({
+        tableHeader: true,
+        children: token.headers.map(cell =>
+          new TableCell({
+            children: [
+              new Paragraph({
                 children: [
-                  new Paragraph({
-                    children: [
-                      new TextRun({
-                        text: h,
-                        bold: true,
-                        font: 'Calibri',
-                        size: 20,
-                        color: '444444',
-                      }),
-                    ],
-                  }),
+                  run(cell, { bold: true, size: SIZE_BODY_SMALL }),
                 ],
-                shading: {
-                  type: ShadingType.SOLID,
-                  color: 'F0F0EE',
-                  fill: 'F0F0EE',
-                },
-                margins: { top: 80, bottom: 80, left: 120, right: 120 },
-              })
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 60, after: 60, line: 240, lineRule: 'auto' },
+              }),
+            ],
+            margins: { top: 60, bottom: 60, left: 80, right: 80 },
+          })
+        ),
+      })
+
+      const bodyRows = token.rows.map(row =>
+        new TableRow({
+          children: row.map(cell =>
+            new TableCell({
+              children: [
+                new Paragraph({
+                  children: toChildren(parseInline(cell), { size: SIZE_BODY_SMALL }),
+                  alignment: AlignmentType.BOTH,
+                  spacing: { before: 60, after: 60, line: 240, lineRule: 'auto' },
+                }),
+              ],
+              margins: { top: 60, bottom: 60, left: 80, right: 80 },
+            })
           ),
-          tableHeader: true,
         })
       )
 
-      for (const row of token.rows) {
-        tableRows.push(
-          new TableRow({
-            children: row.map(
-              cell =>
-                new TableCell({
-                  children: [
-                    new Paragraph({
-                      children: parseInline(cell).map(tokenToRun),
-                    }),
-                  ],
-                  margins: { top: 80, bottom: 80, left: 120, right: 120 },
-                })
-            ),
-          })
-        )
-      }
-
       return [
         new Table({
-          rows: tableRows,
           width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: [headerRow, ...bodyRows],
+          borders: {
+            top:              border,
+            bottom:           border,
+            left:             border,
+            right:            border,
+            insideHorizontal: border,
+            insideVertical:   border,
+          },
         }),
       ]
     }
@@ -510,33 +627,39 @@ function blockToParagraphs(token: BlockToken): (Paragraph | Table)[] {
   }
 }
 
-// ── Главная функция экспорта ──────────────────────────────────
+// ── Главная функция ───────────────────────────────────────────
+
 export async function exportToWord(
   title: string,
   markdownContent: string
 ): Promise<void> {
-  const blocks = parseBlocks(markdownContent)
+  const blocks   = parseBlocks(markdownContent)
   const children: (Paragraph | Table)[] = []
 
-  children.push(
-    new Paragraph({
-      heading: HeadingLevel.TITLE,
-      children: [
-        new TextRun({
-          text: title,
-          font: 'Garamond',
-          size: 64,
-          bold: false,
-          color: '1A1A1A',
-        }),
-      ],
-      spacing: { after: 400 },
-    })
-  )
+  // Титульный заголовок
+  if (title.trim()) {
+    children.push(
+      new Paragraph({
+        children: [
+          run(title.trim(), {
+            bold:  true,
+            size:  SIZE_H1,
+          }),
+        ],
+        alignment: AlignmentType.CENTER,
+        indent: undefined,
+        spacing: {
+          before: 0,
+          after:  LINE_SPACING,
+          line:   LINE_SPACING,
+          lineRule: 'auto',
+        },
+      })
+    )
+  }
 
   for (const block of blocks) {
-    const paragraphs = blockToParagraphs(block)
-    children.push(...paragraphs)
+    children.push(...blockToElements(block))
   }
 
   const doc = new Document({
@@ -544,21 +667,21 @@ export async function exportToWord(
       config: [
         {
           reference: 'ordered-list',
-          levels: [0, 1, 2].map(level => ({
+          levels: [0, 1, 2, 3].map(level => ({
             level,
             format: LevelFormat.DECIMAL,
-            text: `%${level + 1}.`,
+            text:   `%${level + 1}.`,
             alignment: AlignmentType.LEFT,
             style: {
               paragraph: {
                 indent: {
-                  left: convertInchesToTwip(0.25 + level * 0.25),
-                  hanging: convertInchesToTwip(0.25),
+                  left:    convertMillimetersToTwip(12.5 + level * 12.5),
+                  hanging: convertMillimetersToTwip(6.25),
                 },
               },
               run: {
-                font: 'Calibri',
-                size: 24,
+                font: FONT_MAIN,
+                size: SIZE_BODY,
               },
             },
           })),
@@ -569,37 +692,92 @@ export async function exportToWord(
     styles: {
       default: {
         document: {
-          run: { font: 'Calibri', size: 24, color: '1A1A1A' },
-          paragraph: { spacing: { line: 276 } },
+          run: {
+            font:  FONT_MAIN,
+            size:  SIZE_BODY,
+            color: '000000',
+          },
+          paragraph: {
+            spacing: {
+              line:     LINE_SPACING,
+              lineRule: 'auto',
+              before:   SPACING_BEFORE,
+              after:    SPACING_AFTER,
+            },
+          },
         },
       },
+
       paragraphStyles: [
         {
-          id: 'Title',
-          name: 'Title',
-          basedOn: 'Normal',
-          run: { font: 'Garamond', size: 64, color: '1A1A1A' },
+          id:       'Normal',
+          name:     'Normal',
+          basedOn:  'Normal',
+          run: {
+            font:  FONT_MAIN,
+            size:  SIZE_BODY,
+            color: '000000',
+          },
         },
         {
-          id: 'Heading1',
-          name: 'Heading 1',
+          id:      'Heading1',
+          name:    'Heading 1',
           basedOn: 'Normal',
-          run: { font: 'Garamond', size: 52, bold: true, color: '1A1A1A' },
-          paragraph: { spacing: { before: 480, after: 160 } },
+          run: {
+            font:  FONT_MAIN,
+            size:  SIZE_H1,
+            bold:  true,
+            color: '000000',
+          },
+          paragraph: {
+            alignment: AlignmentType.CENTER,
+            spacing: {
+              before: LINE_SPACING,
+              after:  LINE_SPACING,
+              line:   LINE_SPACING,
+              lineRule: 'auto',
+            },
+          },
         },
         {
-          id: 'Heading2',
-          name: 'Heading 2',
+          id:      'Heading2',
+          name:    'Heading 2',
           basedOn: 'Normal',
-          run: { font: 'Garamond', size: 40, bold: true, color: '1A1A1A' },
-          paragraph: { spacing: { before: 360, after: 120 } },
+          run: {
+            font:  FONT_MAIN,
+            size:  SIZE_H2,
+            bold:  true,
+            color: '000000',
+          },
+          paragraph: {
+            alignment: AlignmentType.CENTER,
+            spacing: {
+              before: LINE_SPACING,
+              after:  LINE_SPACING,
+              line:   LINE_SPACING,
+              lineRule: 'auto',
+            },
+          },
         },
         {
-          id: 'Heading3',
-          name: 'Heading 3',
+          id:      'Heading3',
+          name:    'Heading 3',
           basedOn: 'Normal',
-          run: { font: 'Garamond', size: 32, bold: false, color: '1A1A1A' },
-          paragraph: { spacing: { before: 280, after: 100 } },
+          run: {
+            font:  FONT_MAIN,
+            size:  SIZE_H3,
+            bold:  true,
+            color: '000000',
+          },
+          paragraph: {
+            alignment: AlignmentType.CENTER,
+            spacing: {
+              before: LINE_SPACING,
+              after:  LINE_SPACING,
+              line:   LINE_SPACING,
+              lineRule: 'auto',
+            },
+          },
         },
       ],
     },
@@ -609,10 +787,10 @@ export async function exportToWord(
         properties: {
           page: {
             margin: {
-              top: convertInchesToTwip(1),
-              bottom: convertInchesToTwip(1),
-              left: convertInchesToTwip(1.25),
-              right: convertInchesToTwip(1.25),
+              top:    MARGIN_TOP,
+              bottom: MARGIN_BOTTOM,
+              left:   MARGIN_LEFT,
+              right:  MARGIN_RIGHT,
             },
           },
         },
@@ -622,8 +800,5 @@ export async function exportToWord(
   })
 
   const blob = await Packer.toBlob(doc)
-
-  // ── ИСПРАВЛЕНО: усиленная санитизация имени файла ────────────
-  const safeTitle = sanitizeFileName(title)
-  saveAs(blob, `${safeTitle}.docx`)
+  saveAs(blob, `${sanitizeFileName(title)}.docx`)
 }

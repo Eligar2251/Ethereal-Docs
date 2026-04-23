@@ -19,6 +19,7 @@ interface SettingsPanelProps {
   isOpen: boolean
   onClose: () => void
   documentId: string
+  userId: string
   currentSettings: DocumentSettings
   onSettingsChange: (settings: DocumentSettings) => void
 }
@@ -65,12 +66,7 @@ const THEMES: { value: AppTheme; label: string; swatchClass: string }[] = [
   { value: 'sepia', label: 'Sepia', swatchClass: styles.swatchSepia },
 ]
 
-const FONTS: {
-  value: AppFont
-  label: string
-  sample: string
-  sampleClass: string
-}[] = [
+const FONTS: { value: AppFont; label: string; sample: string; sampleClass: string }[] = [
   {
     value: 'serif',
     label: 'Serif',
@@ -85,16 +81,16 @@ const FONTS: {
   },
 ]
 
-// ── ИСПРАВЛЕНО: белые списки допустимых значений ─────────────
 const VALID_THEMES = new Set<AppTheme>(['light', 'dark', 'sepia'])
 const VALID_FONTS = new Set<AppFont>(['serif', 'sans'])
+const VALID_MODES = new Set(['split', 'preview', 'write'])
 
 function isValidSettings(s: DocumentSettings): boolean {
   return (
     VALID_THEMES.has(s.theme) &&
     VALID_FONTS.has(s.font) &&
-    typeof s.focusMode === 'boolean' &&
-    ['split', 'preview', 'write'].includes(s.editorMode)
+    VALID_MODES.has(s.editorMode) &&
+    typeof s.focusMode === 'boolean'
   )
 }
 
@@ -145,6 +141,7 @@ function SettingsPanelInner({
   isOpen,
   onClose,
   documentId,
+  userId,
   currentSettings,
   onSettingsChange,
 }: SettingsPanelProps) {
@@ -171,56 +168,47 @@ function SettingsPanelInner({
     startSaveTransition(async () => {
       setSaveError(null)
 
-      const supabase = createClient()
-
-      // ── ИСПРАВЛЕНО: получаем user и добавляем user_id проверку ──
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (!user) {
-        setSaveError('Not authenticated')
-        return
-      }
-
-      // ── ИСПРАВЛЕНО: валидация settings перед сохранением ─────
       if (!isValidSettings(localSettings)) {
         setSaveError('Invalid settings values')
         return
       }
 
-      // Обновляем документ с проверкой user_id
-      const { error: docError } = await supabase
-        .from('documents')
-        .update({ settings: localSettings })
-        .eq('id', documentId)
-        .eq('user_id', user.id) // ← ИСПРАВЛЕНО: добавлена проверка владельца
+      try {
+        const supabase = createClient()
 
-      if (docError) {
-        setSaveError('Failed to save settings')
-        console.error('[SettingsPanel] Doc update failed:', docError.message)
-        return
+        const { error: docError } = await supabase
+          .from('documents')
+          .update({ settings: localSettings })
+          .eq('id', documentId)
+          .eq('user_id', userId)
+
+        if (docError) {
+          setSaveError('Failed to save settings')
+          console.error('[SettingsPanel] Doc update failed:', docError.message)
+          return
+        }
+
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .update({
+            theme: localSettings.theme,
+            font: localSettings.font,
+          })
+          .eq('id', userId)
+
+        if (profileError) {
+          console.warn('[SettingsPanel] Profile update failed:', profileError.message)
+        }
+
+        onSettingsChange(localSettings)
+        setSavedFlash(true)
+        setTimeout(() => setSavedFlash(false), 1500)
+      } catch (error) {
+        setSaveError('Network error')
+        console.error('[SettingsPanel] Network error:', error)
       }
-
-      // Обновляем профиль пользователя
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({
-          theme: localSettings.theme,
-          font: localSettings.font,
-        })
-        .eq('id', user.id)
-
-      if (profileError) {
-        // Не критично — документ уже сохранён
-        console.warn('[SettingsPanel] Profile update failed:', profileError.message)
-      }
-
-      onSettingsChange(localSettings)
-      setSavedFlash(true)
-      setTimeout(() => setSavedFlash(false), 1500)
     })
-  }, [documentId, localSettings, onSettingsChange])
+  }, [documentId, localSettings, onSettingsChange, userId])
 
   const handleBackdropClick = useCallback(
     (e: MouseEvent<HTMLDivElement>) => {
@@ -265,16 +253,12 @@ function SettingsPanelInner({
             </div>
 
             <div className={styles.panelBody}>
-              {/* ── Theme section ── */}
               <section className={styles.section}>
                 <p className={styles.sectionLabel}>Theme</p>
-                <div
-                  className={styles.themeGrid}
-                  role="radiogroup"
-                  aria-label="Select theme"
-                >
+                <div className={styles.themeGrid} role="radiogroup" aria-label="Select theme">
                   {THEMES.map(({ value, label, swatchClass }) => {
                     const isActive = localSettings.theme === value
+
                     return (
                       <button
                         key={value}
@@ -302,11 +286,7 @@ function SettingsPanelInner({
                                 animate={{
                                   scale: 1,
                                   opacity: 1,
-                                  transition: {
-                                    type: 'spring',
-                                    stiffness: 500,
-                                    damping: 28,
-                                  },
+                                  transition: { type: 'spring', stiffness: 500, damping: 28 },
                                 }}
                                 exit={{ scale: 0, opacity: 0 }}
                               >
@@ -315,6 +295,7 @@ function SettingsPanelInner({
                             )}
                           </AnimatePresence>
                         </div>
+
                         <span className={styles.swatchLabel}>{label}</span>
                       </button>
                     )
@@ -324,16 +305,12 @@ function SettingsPanelInner({
 
               <div className={styles.divider} aria-hidden="true" />
 
-              {/* ── Font section ── */}
               <section className={styles.section}>
                 <p className={styles.sectionLabel}>Font Style</p>
-                <div
-                  className={styles.fontOptions}
-                  role="radiogroup"
-                  aria-label="Select font style"
-                >
+                <div className={styles.fontOptions} role="radiogroup" aria-label="Select font style">
                   {FONTS.map(({ value, label, sample, sampleClass }) => {
                     const isActive = localSettings.font === value
+
                     return (
                       <button
                         key={value}
@@ -363,7 +340,6 @@ function SettingsPanelInner({
 
               <div className={styles.divider} aria-hidden="true" />
 
-              {/* ── Writing section ── */}
               <section className={styles.section}>
                 <p className={styles.sectionLabel}>Writing</p>
                 <ToggleSwitch
@@ -378,11 +354,7 @@ function SettingsPanelInner({
 
             <div className={styles.panelFooter}>
               <span className={styles.footerHint}>
-                {saveError ? (
-                  <span style={{ color: '#DC2626' }}>{saveError}</span>
-                ) : (
-                  'Settings apply to this document.'
-                )}
+                {saveError ? <span style={{ color: '#DC2626' }}>{saveError}</span> : 'Settings apply to this document.'}
               </span>
 
               <button

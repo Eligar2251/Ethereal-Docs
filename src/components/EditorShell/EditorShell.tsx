@@ -13,6 +13,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Toolbar } from '@/components/Toolbar/Toolbar'
 import { ThemeProvider } from '@/components/ThemeProvider/ThemeProvider'
 import { useFocusMode } from '@/hooks/useFocusMode'
+import { useSessionGuard } from '@/hooks/useSessionGuard'
+import { SessionExpiredBanner } from '@/components/SessionExpiredBanner/SessionExpiredBanner'
 import { createClient } from '@/lib/supabase/client'
 import type { Document, EditorMode, DocumentSettings } from '@/types/database'
 import type { SaveState } from '@/components/SaveIndicator/SaveIndicator'
@@ -37,29 +39,17 @@ const SettingsPanel = dynamic(
   { ssr: false }
 )
 
-// ── Константы ────────────────────────────────────────────────
 const AUTOSAVE_DELAY = 2000
+const MAX_CONTENT_SIZE = 500_000
+const MAX_TITLE_LENGTH = 200
 
-// ── ИСПРАВЛЕНО: ограничения на размер данных ─────────────────
-const MAX_CONTENT_SIZE = 500_000  // 500KB — более чем достаточно
-const MAX_TITLE_LENGTH = 200      // символов
-
-// ── Утилиты санитизации ──────────────────────────────────────
-
-/**
- * Санитизирует заголовок документа:
- * - обрезает до MAX_TITLE_LENGTH символов
- * - убирает HTML-опасные символы
- */
 function sanitizeTitle(raw: string): string {
-  return raw
-    .slice(0, MAX_TITLE_LENGTH)
-    .replace(/[<>"]/g, '')
+  return raw.slice(0, MAX_TITLE_LENGTH).replace(/[<>"]/g, '')
 }
 
-// ── Autosave hook ────────────────────────────────────────────
 function useAutosave(
   documentId: string,
+  userId: string,
   onStateChange: (s: SaveState) => void
 ) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -74,73 +64,55 @@ function useAutosave(
   }, [])
 
   const save = useCallback(
-    async (
-      id: string,
-      title: string,
-      content: string,
-      s: DocumentSettings
-    ) => {
+    async (id: string, title: string, content: string, s: DocumentSettings) => {
       if (!mountedRef.current) return
 
-      // ── ИСПРАВЛЕНО: проверка размера контента ────────────────
       if (content.length > MAX_CONTENT_SIZE) {
         if (mountedRef.current) onStateChange('error')
-        console.error(
-          '[Autosave] Content too large:',
-          content.length,
-          'chars (max:',
-          MAX_CONTENT_SIZE,
-          ')'
-        )
         return
       }
 
       onStateChange('saving')
 
-      const supabase = createClient()
+      try {
+        const supabase = createClient()
 
-      // Проверяем авторизацию перед сохранением
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+        const { error } = await supabase
+          .from('documents')
+          .update({
+            title,
+            content,
+            settings: s,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', id)
+          .eq('user_id', userId)
 
-      if (!user) {
-        if (mountedRef.current) onStateChange('error')
-        console.error('[Autosave] No authenticated user')
-        return
-      }
+        if (!mountedRef.current) return
 
-      const { error } = await supabase
-        .from('documents')
-        .update({
-          title,
-          content,
-          settings: s,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id)
-        .eq('user_id', user.id) // защита: только свои документы
+        onStateChange(error ? 'error' : 'saved')
 
-      if (!mountedRef.current) return
-
-      onStateChange(error ? 'error' : 'saved')
-
-      if (!error) {
-        setTimeout(() => {
-          if (mountedRef.current) onStateChange('idle')
-        }, 2000)
-      } else {
-        console.error('[Autosave] Failed:', error.message)
+        if (!error) {
+          setTimeout(() => {
+            if (mountedRef.current) onStateChange('idle')
+          }, 2000)
+        } else {
+          console.error('[Autosave] Failed:', error.message)
+        }
+      } catch (err) {
+        if (!mountedRef.current) return
+        onStateChange('error')
+        console.error('[Autosave] Network error:', err)
       }
     },
-    [onStateChange]
+    [onStateChange, userId]
   )
 
   const scheduleSave = useCallback(
     (id: string, title: string, content: string, s: DocumentSettings) => {
       if (timerRef.current) clearTimeout(timerRef.current)
       timerRef.current = setTimeout(
-        () => save(id, title, content, s),
+        () => void save(id, title, content, s),
         AUTOSAVE_DELAY
       )
     },
@@ -150,7 +122,6 @@ function useAutosave(
   return { scheduleSave }
 }
 
-// ── Framer Motion variants ────────────────────────────────────
 const paneVariants = {
   hidden: { opacity: 0 },
   visible: {
@@ -160,15 +131,15 @@ const paneVariants = {
   exit: { opacity: 0, transition: { duration: 0.15 } },
 }
 
-// ── Props ─────────────────────────────────────────────────────
 interface EditorShellProps {
   document: Document
+  userId: string
   onDocumentUpdate?: (doc: Partial<Document>) => void
 }
 
-// ── Component ─────────────────────────────────────────────────
 function EditorShellInner({
   document: initialDoc,
+  userId,
   onDocumentUpdate,
 }: EditorShellProps) {
   const [title, setTitle] = useState(initialDoc.title)
@@ -179,36 +150,41 @@ function EditorShellInner({
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   const deferredContent = useDeferredValue(content)
-  const { scheduleSave } = useAutosave(initialDoc.id, setSaveState)
+  const { scheduleSave } = useAutosave(initialDoc.id, userId, setSaveState)
+
+  // ── Следим за сессией ────────────────────────────────────────
+  const { sessionExpired } = useSessionGuard()
+
+  // ── Есть ли несохранённый контент ────────────────────────────
+  // Считаем "несохранённым" если saveState не idle/saved
+  const hasUnsavedContent =
+    saveState === 'saving' || saveState === 'error'
 
   const { isFocused, containerProps } = useFocusMode({
-    enabled: settings.focusMode,
+    enabled: settings.focusMode && !sessionExpired,
     idleDelay: 1500,
   })
 
-  // ── ИСПРАВЛЕНО: санитизация content при изменении ────────────
   const handleContentChange = useCallback(
     (val: string) => {
-      // Не принимаем контент больше лимита
-      if (val.length > MAX_CONTENT_SIZE) {
-        console.warn('[Editor] Content exceeds size limit, truncating')
-        return
-      }
+      // Блокируем редактирование если сессия истекла
+      if (sessionExpired) return
+      if (val.length > MAX_CONTENT_SIZE) return
       setContent(val)
       scheduleSave(initialDoc.id, title, val, settings)
     },
-    [initialDoc.id, title, settings, scheduleSave]
+    [initialDoc.id, scheduleSave, sessionExpired, settings, title]
   )
 
-  // ── ИСПРАВЛЕНО: санитизация title при изменении ──────────────
   const handleTitleChange = useCallback(
     (val: string) => {
+      if (sessionExpired) return
       const sanitized = sanitizeTitle(val)
       setTitle(sanitized)
       onDocumentUpdate?.({ title: sanitized })
       scheduleSave(initialDoc.id, sanitized, content, settings)
     },
-    [initialDoc.id, content, settings, scheduleSave, onDocumentUpdate]
+    [content, initialDoc.id, onDocumentUpdate, scheduleSave, sessionExpired, settings]
   )
 
   const handleModeChange = useCallback(
@@ -217,7 +193,7 @@ function EditorShellInner({
       setSettings(next)
       scheduleSave(initialDoc.id, title, content, next)
     },
-    [initialDoc.id, title, content, settings, scheduleSave]
+    [content, initialDoc.id, scheduleSave, settings, title]
   )
 
   const handleSettingsChange = useCallback((next: DocumentSettings) => {
@@ -235,9 +211,7 @@ function EditorShellInner({
     <ThemeProvider theme={settings.theme} font={settings.font}>
       <div className={rootClassName} {...containerProps}>
         <div
-          className={`${styles.focusVignette} ${
-            isFocused ? styles.focusVignetteActive : ''
-          }`}
+          className={`${styles.focusVignette} ${isFocused ? styles.focusVignetteActive : ''}`}
           aria-hidden="true"
         />
 
@@ -266,9 +240,14 @@ function EditorShellInner({
                 animate="visible"
                 exit="exit"
               >
-                <Editor content={content} onChange={handleContentChange} />
+                <Editor
+                  content={content}
+                  onChange={handleContentChange}
+                  disabled={sessionExpired}
+                />
               </motion.div>
             )}
+
             {editorMode === 'preview' && (
               <motion.div
                 key="preview"
@@ -281,6 +260,7 @@ function EditorShellInner({
                 <MarkdownPreview content={deferredContent} />
               </motion.div>
             )}
+
             {editorMode === 'split' && (
               <motion.div
                 key="split"
@@ -291,7 +271,11 @@ function EditorShellInner({
                 exit="exit"
               >
                 <div className={styles.paneSplitEditor}>
-                  <Editor content={content} onChange={handleContentChange} />
+                  <Editor
+                    content={content}
+                    onChange={handleContentChange}
+                    disabled={sessionExpired}
+                  />
                 </div>
                 <div className={styles.paneSplitPreview}>
                   <MarkdownPreview content={deferredContent} />
@@ -305,9 +289,17 @@ function EditorShellInner({
           isOpen={settingsOpen}
           onClose={handleCloseSettings}
           documentId={initialDoc.id}
+          userId={userId}
           currentSettings={settings}
           onSettingsChange={handleSettingsChange}
         />
+
+        {/* ── Баннер об истечении сессии ── */}
+        <AnimatePresence>
+          {sessionExpired && (
+            <SessionExpiredBanner hasUnsavedContent={hasUnsavedContent} />
+          )}
+        </AnimatePresence>
       </div>
     </ThemeProvider>
   )

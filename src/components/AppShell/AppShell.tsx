@@ -3,6 +3,9 @@
 import {
   useState,
   useCallback,
+  useEffect,
+  useMemo,
+  useRef,
   memo,
 } from 'react'
 import dynamic from 'next/dynamic'
@@ -40,6 +43,7 @@ interface AppShellProps {
   initialActiveDocument: Document | null
   profile: Profile | null
   userEmail: string
+  userId: string
 }
 
 function AppShellInner({
@@ -47,130 +51,177 @@ function AppShellInner({
   initialActiveDocument,
   profile,
   userEmail,
+  userId,
 }: AppShellProps) {
   const [documents, setDocuments] = useState<DocumentSummary[]>(initialDocuments)
   const [activeDocument, setActiveDocument] = useState<Document | null>(initialActiveDocument)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [isDocListLoading] = useState(false)
 
-  const loadDocument = useCallback((id: string) => {
-    const supabase = createClient()
+  // ── Кэш уже загруженных документов ──────────────────────────
+  const documentCacheRef = useRef<Map<string, Document>>(
+    new Map(
+      initialActiveDocument
+        ? [[initialActiveDocument.id, initialActiveDocument]]
+        : []
+    )
+  )
 
-    supabase
-      .from('documents')
-      .select('*')
-      .eq('id', id)
-      .single()
-      .then(({ data, error }) => {
+  // ── Защита от повторных запросов одного и того же документа ─
+  const pendingLoadsRef = useRef<Set<string>>(new Set())
+
+  const loadDocument = useCallback(
+    async (id: string) => {
+      // 1. Если уже в кэше — открываем мгновенно
+      const cached = documentCacheRef.current.get(id)
+      if (cached) {
+        setActiveDocument(cached)
+        return
+      }
+
+      // 2. Если уже загружается — не дублируем запрос
+      if (pendingLoadsRef.current.has(id)) return
+      pendingLoadsRef.current.add(id)
+
+      try {
+        const supabase = createClient()
+
+        const { data, error } = await supabase
+          .from('documents')
+          .select('*')
+          .eq('id', id)
+          .eq('user_id', userId)
+          .single()
+
         if (!error && data) {
-          setActiveDocument(data as Document)
+          const doc = data as Document
+          documentCacheRef.current.set(id, doc)
+          setActiveDocument(doc)
+        } else if (error) {
+          console.error('[Load document] Failed:', error.message)
         }
-      })
-  }, [])
+      } catch (error) {
+        console.error('[Load document] Network error:', error)
+      } finally {
+        pendingLoadsRef.current.delete(id)
+      }
+    },
+    [userId]
+  )
 
   const handleSelectDocument = useCallback(
     (id: string) => {
       if (activeDocument?.id === id) return
-      loadDocument(id)
+      void loadDocument(id)
     },
     [activeDocument?.id, loadDocument]
   )
 
   const handleCreateDocument = useCallback(async (): Promise<string | null> => {
-    const supabase = createClient()
+    try {
+      const supabase = createClient()
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+      const { data, error } = await supabase
+        .from('documents')
+        .insert({
+          user_id: userId,
+          title: 'Untitled Document',
+          content: '',
+          settings: DEFAULT_SETTINGS,
+        })
+        .select('*')
+        .single()
 
-    if (!user) return null
+      if (error || !data) {
+        console.error('[Create] Failed:', error?.message)
+        return null
+      }
 
-    const { data, error } = await supabase
-      .from('documents')
-      .insert({
-        user_id: user.id,
-        title: 'Untitled Document',
-        content: '',
-        settings: DEFAULT_SETTINGS,
-      })
-      .select(
-        'id, user_id, title, settings, is_deleted, created_at, updated_at, content_preview:content'
-      )
-      .single()
+      const doc = data as Document
 
-    if (error || !data) {
-      console.error('[Create] Failed:', error?.message)
+      const summary: DocumentSummary = {
+        id: doc.id,
+        user_id: doc.user_id,
+        title: doc.title,
+        settings: doc.settings,
+        is_deleted: doc.is_deleted,
+        created_at: doc.created_at,
+        updated_at: doc.updated_at,
+        content_preview: '',
+      }
+
+      documentCacheRef.current.set(doc.id, doc)
+      setDocuments(prev => [summary, ...prev])
+      setActiveDocument(doc)
+
+      return doc.id
+    } catch (error) {
+      console.error('[Create] Network error:', error)
       return null
     }
-
-    const summary: DocumentSummary = {
-      id: data.id,
-      user_id: data.user_id,
-      title: data.title,
-      settings: data.settings,
-      is_deleted: data.is_deleted,
-      created_at: data.created_at,
-      updated_at: data.updated_at,
-      content_preview: '',
-    }
-
-    setDocuments(prev => [summary, ...prev])
-
-    // Сразу открываем новый документ локально
-    setActiveDocument({
-      id: data.id,
-      user_id: data.user_id,
-      title: data.title,
-      content: '',
-      settings: data.settings,
-      is_deleted: data.is_deleted,
-      deleted_at: null,
-      created_at: data.created_at,
-      updated_at: data.updated_at,
-    } as Document)
-
-    return data.id
-  }, [])
+  }, [userId])
 
   const handleDeleteDocument = useCallback(
     async (id: string) => {
-      const supabase = createClient()
+      try {
+        const supabase = createClient()
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+        const { error } = await supabase
+          .from('documents')
+          .update({
+            is_deleted: true,
+            deleted_at: new Date().toISOString(),
+          })
+          .eq('id', id)
+          .eq('user_id', userId)
 
-      if (!user) {
-        console.error('[Delete] No authenticated user')
-        return
-      }
+        if (error) {
+          console.error('[Delete] Failed:', error.message)
+          return
+        }
 
-      const { error } = await supabase
-        .from('documents')
-        .update({
-          is_deleted: true,
-          deleted_at: new Date().toISOString(),
-        })
-        .eq('id', id)
-        .eq('user_id', user.id)
+        documentCacheRef.current.delete(id)
+        setDocuments(prev => prev.filter(d => d.id !== id))
 
-      if (error) {
-        console.error('[Delete] Failed:', error.message)
-        return
-      }
+        if (activeDocument?.id === id) {
+          const remaining = documents.filter(d => d.id !== id)
+          const nextId = remaining[0]?.id ?? null
 
-      setDocuments(prev => prev.filter(d => d.id !== id))
-
-      if (activeDocument?.id === id) {
-        setActiveDocument(null)
+          if (nextId) {
+            const cached = documentCacheRef.current.get(nextId)
+            setActiveDocument(cached ?? null)
+            if (!cached) void loadDocument(nextId)
+          } else {
+            setActiveDocument(null)
+          }
+        }
+      } catch (error) {
+        console.error('[Delete] Network error:', error)
       }
     },
-    [activeDocument?.id]
+    [activeDocument?.id, documents, loadDocument, userId]
   )
 
   const handleToggleSidebar = useCallback(() => {
     setSidebarOpen(prev => !prev)
   }, [])
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+        e.preventDefault()
+        setSidebarOpen(prev => !prev)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  const rootKey = useMemo(
+    () => activeDocument?.id ?? 'welcome',
+    [activeDocument?.id]
+  )
 
   return (
     <div className={styles.root}>
@@ -199,7 +250,7 @@ function AppShellInner({
         <AnimatePresence mode="wait">
           {activeDocument ? (
             <motion.div
-              key={activeDocument.id}
+              key={rootKey}
               className={styles.editorPane}
               initial={{ opacity: 0 }}
               animate={{
@@ -210,7 +261,15 @@ function AppShellInner({
             >
               <EditorShell
                 document={activeDocument}
+                userId={userId}
                 onDocumentUpdate={(update) => {
+                  setActiveDocument(prev => {
+                    if (!prev) return prev
+                    const next = { ...prev, ...update }
+                    documentCacheRef.current.set(prev.id, next as Document)
+                    return next as Document
+                  })
+
                   if (update.title !== undefined) {
                     setDocuments(prev =>
                       prev.map(d =>
